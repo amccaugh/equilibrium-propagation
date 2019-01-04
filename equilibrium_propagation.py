@@ -4,7 +4,7 @@ from matplotlib import pyplot as plt
 # TODO / things to try:
 # - Divide weight matrix by 10
 # - Disable state clipping / allow neuron states to be negative (Bengio STDP-compatible allows it!)
-# - Try small-world style connections (~N/2^k connections per layer to layers k distance away)
+# - Try small-world style W_exists (~N/2^k W_exists per layer to layers k distance away)
 
 
 #%% Neuron implementation
@@ -23,7 +23,7 @@ ihy = list(range(layer_indices[1], layer_indices[-1]))
 
 def intialize_weight_matrix(layer_sizes, seed = None):
     W = np.zeros([num_neurons,num_neurons])
-    connections = np.zeros([num_neurons,num_neurons])
+    W_exists = np.zeros(W.shape)
     # Initialize weights matrix
     for n in range(len(layer_sizes)-1): # Make weights only exist from one layer to the next
         wll = np.random.randn(layer_sizes[n+1],layer_sizes[n]) # The weight matrix for one layer to the next
@@ -34,12 +34,12 @@ def intialize_weight_matrix(layer_sizes, seed = None):
         di = wll.shape[0]
         dj = wll.shape[1]
         W[i:i+di, j:j+dj] = wll
-        connections[i:i+di, j:j+dj] = wll*0 + 1
+        W_exists[i:i+di, j:j+dj] = wll*0 + 1
     W += W.T # Make weights symmetric
-    connections += connections.T
+    W_exists += W_exists.T
     W = np.matrix(W)
-    connections = np.matrix(connections)
-    return W, connections
+    W_exists = np.matrix(W_exists)
+    return W, W_exists
 
 # Initialize state matrix
 def initialize_state(seed = None):
@@ -82,7 +82,7 @@ def step(s, W, eps, beta, d):
     return s
     
 s = initialize_state(seed = 0)
-W,connections = intialize_weight_matrix(layer_sizes = layer_sizes, seed = 0)
+W,W_exists = intialize_weight_matrix(layer_sizes = layer_sizes, seed = 0)
 
 eps = 0.01
 total_tau = 10 # Amount of time to evolve state
@@ -135,17 +135,13 @@ ax[1].set_xlabel('Time (t/tau)')
 
 
 # Weight update
+def weight_update(W, W_exists, s_free_phase, s_clamped_phase):
+    # W_exists = matrix of shape(W) with 1s or zeros based on 
+    # whether the connection / weight between i and j exists
+    dW = 1/beta*(rho(s_clamped_phase) @ rho(s_clamped_phase).T -
+                 rho(s_free_phase) @ rho(s_free_phase).T
+                 )
+    dW = np.multiply(dW, W_exists)
+    return dW
 
-# Test weight update -- explicit implementation
-dW = W*0
-for i in range(W.shape[0]):
-    for j in range(W.shape[1]):
-        dW[i,j] = 1/beta*( rho(s_clamped_phase[i])*rho(s_clamped_phase[j]) -
-                          rho(s_free_phase[i])*rho(s_free_phase[j])
-                        )
-
-# Compare matrix-multiplication-based weight update
-dW = 1/beta*(rho(s_clamped_phase) @ rho(s_clamped_phase).T -
-             rho(s_free_phase) @ rho(s_free_phase).T
-             )
-#dW = np.multiply(dW, connections)
+dW = weight_update(W, W_exists, s_free_phase, s_clamped_phase)
