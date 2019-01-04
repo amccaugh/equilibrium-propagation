@@ -9,6 +9,8 @@ from matplotlib import pyplot as plt
 
 
 #%% Neuron implementation
+np.random.seed(seed = 0)
+
 
 layer_sizes = [5, 30, 30, 10]
 #layer_sizes = [7*7, 50, 10]
@@ -30,8 +32,11 @@ W += W.T # Make weights symmetric
 W = np.matrix(W)
 
 # Initialize state matrix
-s = np.random.rand(num_neurons)
-s = np.matrix(s).T
+def initialize_state(seed = None):
+    np.random.seed(seed = seed)
+    s = np.random.rand(num_neurons)
+    s = np.matrix(s).T
+    return s
 
 # Set up indices of neurons for easy access later
 ix = list(range(0, layer_indices[1]))
@@ -62,28 +67,26 @@ def F(s, W, beta, d):
         return E(s, W)
     return sum(E(s, W) + beta*C(y = s[iy], d = d)) # + term3
 
-#def step(s, W, beta, d):
-#    Rs = np.matmul(W,rho(s))
-#    s[ihy] += eps*(Rs - s)[ihy] # dE/ds term
-#    if beta != 0:
-#        s[iy]  += eps*beta*(d - s[iy]) # beta*dC/ds term
-#    # Clipping prevents states from becoming negative due to bad (Euler) time integration
-#    # Also, clipping = equivalent to multiplying R(s) by rhoprime(s) when beta = 0
-#    s[ihy] = np.clip(s[ihy], 0, 1)  
-#    return s
+def step(s, W, eps, beta, d):
+    Rs = np.matmul(W,rho(s))
+    s[ihy] += eps*(Rs - s)[ihy] # dE/ds term, multiplied by dt (epsilon)
+    if beta != 0:
+        s[iy]  += eps*beta*(d - s[iy]) # beta*dC/ds term, multiplied by dt (epsilon)
+    # Clipping prevents states from becoming negative due to bad (Euler) time integration
+    # Also, clipping = equivalent to multiplying R(s) by rhoprime(s) when beta = 0
+    s[ihy] = np.clip(s[ihy], 0, 1)  
+    return s
     
+s = initialize_state(0)
 
-eps = 1e-1
+eps = 0.01
+total_tau = 10 # Amount of time to evolve state
+num_steps = int(total_tau/eps)
 # Compute free-phase fixed point
 states = []
 energies = []
-for n in range(10000):
-    Rs = np.matmul(W,rho(s))
-    mu = Rs - s
-    s[ihy] += eps*mu[ihy] # Update output and hidden neurons
-    # Clipping prevents states from becoming negative due to Euler integration
-    # Also, clipping = equivalent to multiplying R(s) by rhoprime(s) when beta = 0
-    s[ihy] = np.clip(s[ihy], 0, 1)  
+for n in range(num_steps):
+    step(s, W, eps = eps, beta = 0, d = None)
     states.append(np.array(s).flatten().tolist())
     energies.append(E(s,W))
 
@@ -95,31 +98,21 @@ ax[0].plot(t, np.array(states)[:,ix],'g')
 ax[0].plot(t, np.array(states)[:,iy],'b')
 ax[0].set_ylabel('State values')
 
-ax[1].plot(t, np.array(energies),'b')
+ax[1].plot(t, np.array(energies),'b.-')
 ax[1].set_ylabel('Energy E')
 ax[1].set_xlabel('Time (t/tau)')
 
 # Compute weakly-clamped fixed point
 states = []
 energies = []
-beta = 0.1
+beta = 1
 d = np.matrix(np.zeros(len(iy))).T # Target
 d[3] = 0.5
-for n in range(1000):
-    Rs = np.multiply(np.matmul(W,rho(s)), rhoprime(s))
-#    Rs[iy] += beta*(s[iy] - d)
-#    dEds = -(np.multiply(np.matmul(W,rho(s)), rhoprime(s)) - s)
-#    dCds = -beta*(d- s[iy])
-#    dsdt = -dEds - beta*dCds
-    mu = Rs - s
-    s[ihy] += eps*(Rs - s)[ihy] # Update output and hidden neurons
-    s[iy]  += eps*beta*(d - s[iy])
-    # Clipping prevents states from becoming negative due to bad (Euler) time integration
-    # Also, clipping = equivalent to multiplying R(s) by rhoprime(s) when beta = 0
-    s[ihy] = np.clip(s[ihy], 0, 1)  
+for n in range(num_steps):
+    step(s, W, eps = eps, beta = beta, d = d)
     states.append(np.array(s).flatten().tolist())
     energies.append(F(s, W, beta, d))
-    
+
 # Plot states
 t = np.linspace(0,len(states) * eps, len(states))
 fig, ax = plt.subplots(2,1, sharex = True)
@@ -128,6 +121,6 @@ ax[0].plot(t, np.array(states)[:,ix],'g')
 ax[0].plot(t, np.array(states)[:,iy],'b')
 ax[0].set_ylabel('State values')
 
-ax[1].plot(t, np.array(energies),'b')
+ax[1].plot(t, np.array(energies),'b.-')
 ax[1].set_ylabel('Energy F')
 ax[1].set_xlabel('Time (t/tau)')
