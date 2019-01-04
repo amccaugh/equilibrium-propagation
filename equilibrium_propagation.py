@@ -11,7 +11,7 @@ from matplotlib import pyplot as plt
 np.random.seed(seed = 0)
 
 
-layer_sizes = [5, 30,30 , 10]
+layer_sizes = [5, 7,9 , 10]
 layer_indices = np.cumsum([0] + layer_sizes)
 num_neurons = sum(layer_sizes)
 
@@ -81,58 +81,28 @@ def step(s, W, eps, beta, d):
     s[ihy] = np.clip(s[ihy], 0, 1)  
     return s
     
-s = initialize_state(seed = 0)
-W,W_exists = intialize_weight_matrix(layer_sizes = layer_sizes, seed = 0)
-
-eps = 0.01
-total_tau = 10 # Amount of time to evolve state
-num_steps = int(total_tau/eps)
-# Compute free-phase fixed point
-states = []
-energies = []
-for n in range(num_steps):
-    step(s, W, eps = eps, beta = 0, d = None)
-    states.append(np.array(s).flatten().tolist())
-    energies.append(E(s,W))
-s_free_phase = s.copy()
-
-# Plot states
-t = np.linspace(0,len(states) * eps, len(states))
-fig, ax = plt.subplots(2,1, sharex = True)
-ax[0].plot(t, np.array(states)[:,ih],'r')
-ax[0].plot(t, np.array(states)[:,ix],'g')
-ax[0].plot(t, np.array(states)[:,iy],'b')
-ax[0].set_ylabel('State values')
-
-ax[1].plot(t, np.array(energies),'b.-')
-ax[1].set_ylabel('Energy E')
-ax[1].set_xlabel('Time (t/tau)')
-
-# Compute weakly-clamped fixed point
-states = []
-energies = []
-beta = 1
-d = np.matrix(np.zeros(len(iy))).T # Target
-d[3] = 0.5
-for n in range(num_steps):
-    step(s, W, eps = eps, beta = beta, d = d)
-    states.append(np.array(s).flatten().tolist())
-    energies.append(F(s, W, beta, d))
-s_clamped_phase = s.copy()
-
-
-# Plot states
-t = np.linspace(0,len(states) * eps, len(states))
-fig, ax = plt.subplots(2,1, sharex = True)
-ax[0].plot(t, np.array(states)[:,ih],'r')
-ax[0].plot(t, np.array(states)[:,ix],'g')
-ax[0].plot(t, np.array(states)[:,iy],'b')
-ax[0].set_ylabel('State values')
-
-ax[1].plot(t, np.array(energies),'b.-')
-ax[1].set_ylabel('Energy F')
-ax[1].set_xlabel('Time (t/tau)')
-
+def evolve_to_equilbrium(s, W, d, beta, eps, total_tau,
+                         state_list = None, energy_list = None):
+    # If state_recorder is passed an (empty) list, it will append each state to it
+    num_steps = int(total_tau/eps)
+    for n in range(num_steps):
+        step(s, W, eps = eps, beta = beta, d = d)
+        if state_list is not None: states.append(np.array(s).flatten().tolist())
+        if energy_list is not None: energies.append(E(s,W))
+    return s
+    
+def plot_states_and_energy(states, energies):
+    # Plot states
+    t = np.linspace(0,len(states) * eps, len(states))
+    fig, ax = plt.subplots(2,1, sharex = True)
+    ax[0].plot(t, np.array(states)[:,ih],'r')
+    ax[0].plot(t, np.array(states)[:,ix],'g')
+    ax[0].plot(t, np.array(states)[:,iy],'b')
+    ax[0].set_ylabel('State values')
+    
+    ax[1].plot(t, np.array(energies),'b.-')
+    ax[1].set_ylabel('Energy E')
+    ax[1].set_xlabel('Time (t/tau)')
 
 # Weight update
 def weight_update(W, W_exists, s_free_phase, s_clamped_phase):
@@ -143,5 +113,20 @@ def weight_update(W, W_exists, s_free_phase, s_clamped_phase):
                  )
     dW = np.multiply(dW, W_exists)
     return dW
+
+
+eps = 0.01
+s = initialize_state(seed = 0)
+W,W_exists = intialize_weight_matrix(layer_sizes = layer_sizes, seed = 0)
+
+states = []
+energies = []
+s_free_phase = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = 10,
+                         state_list = states, energy_list = energies)
+plot_states_and_energy(states, energies)
+
+s_clamped_phase = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = 10,
+                         state_list = states, energy_list = energies)
+plot_states_and_energy(states, energies)
 
 dW = weight_update(W, W_exists, s_free_phase, s_clamped_phase)
