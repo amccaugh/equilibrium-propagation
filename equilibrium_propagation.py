@@ -5,6 +5,7 @@ from matplotlib import pyplot as plt
 # TODO / things to try:
 # - Divide weight matrix by 10
 # - Disable state clipping / allow neuron states to be negative (Bengio STDP-compatible allows it!)
+# - Try small-world style connections (~N/2^k connections per layer to layers k distance away)
 
 
 #%% Neuron implementation
@@ -44,43 +45,45 @@ def rho(s):
 
 def rhoprime(s):
     rp = s*0
-    rp[(0<s) & (s<1)] = 1
+    rp[(0<=s) & (s<=1)] = 1 # SUPER IMPORTANT! if (0<s) & (s<1) zeros + ones cannot escape
     return rp
 
 def E(s, W):
-    term1 = sum(0.5*s.T*s)
-    term2 = sum(-0.5 * rho(s).T @ W @ rho(s))
-#    term3 = -np.sum([b[i]*rho(s[i]) for i in range(len(b))])
-    return term1 + term2 # + term3
-
-def E_test(s, W): # Written out explicitly to check form of E(s,W)
-    term1 = 0
-    term2 = 0
-    for i in range(W.shape[0]):
-        term1 += 0.5*s[i]**2
-        for j in range(W.shape[1]):
-            if i == j:
-                term2 += 0
-            else:
-                term2 += -0.5*W[i,j]*rho(s[i])*rho(s[j])
+    term1 = 0.5*s.T*s
+    term2 = -0.5 * rho(s).T @ W @ rho(s)
 #    term3 = -np.sum([b[i]*rho(s[i]) for i in range(len(b))])
     return sum(term1 + term2) # + term3
 
-#def Rs_test(s, W): # Written out explicitly to check form of E(s,W)
-Rs = np.zeros(np.array(s).shape)
-for i in range(W.shape[0]):
-    for j in range(W.shape[1]):
-        Rs[i] += sum(W[i,j]*rho(s[j]))
+def C(y, d):
+    return 0.5*np.linalg.norm(y-d)**2
+
+def F(s, W, beta, d):
+    if beta == 0:
+        return E(s, W)
+    return sum(E(s, W) + beta*C(y = s[iy], d = d)) # + term3
+
+#def step(s, W, beta, d):
+#    Rs = np.matmul(W,rho(s))
+#    s[ihy] += eps*(Rs - s)[ihy] # dE/ds term
+#    if beta != 0:
+#        s[iy]  += eps*beta*(d - s[iy]) # beta*dC/ds term
+#    # Clipping prevents states from becoming negative due to bad (Euler) time integration
+#    # Also, clipping = equivalent to multiplying R(s) by rhoprime(s) when beta = 0
+#    s[ihy] = np.clip(s[ihy], 0, 1)  
+#    return s
     
-    
-eps = 1e-3
+
+eps = 1e-1
 # Compute free-phase fixed point
 states = []
 energies = []
 for n in range(10000):
-    mu = np.matmul(W,rho(s)) - s
-    s[ihy] += eps*mu[ihy]
-    s[ihy] = np.clip(s[ihy], 0, 1) # Clip state; equivalent to multiplying R(s) by rhoprime(s)
+    Rs = np.matmul(W,rho(s))
+    mu = Rs - s
+    s[ihy] += eps*mu[ihy] # Update output and hidden neurons
+    # Clipping prevents states from becoming negative due to Euler integration
+    # Also, clipping = equivalent to multiplying R(s) by rhoprime(s) when beta = 0
+    s[ihy] = np.clip(s[ihy], 0, 1)  
     states.append(np.array(s).flatten().tolist())
     energies.append(E(s,W))
 
@@ -96,4 +99,35 @@ ax[1].plot(t, np.array(energies),'b')
 ax[1].set_ylabel('Energy E')
 ax[1].set_xlabel('Time (t/tau)')
 
-# Compute free-phase fixed point
+# Compute weakly-clamped fixed point
+states = []
+energies = []
+beta = 0.1
+d = np.matrix(np.zeros(len(iy))).T # Target
+d[3] = 0.5
+for n in range(1000):
+    Rs = np.multiply(np.matmul(W,rho(s)), rhoprime(s))
+#    Rs[iy] += beta*(s[iy] - d)
+#    dEds = -(np.multiply(np.matmul(W,rho(s)), rhoprime(s)) - s)
+#    dCds = -beta*(d- s[iy])
+#    dsdt = -dEds - beta*dCds
+    mu = Rs - s
+    s[ihy] += eps*(Rs - s)[ihy] # Update output and hidden neurons
+    s[iy]  += eps*beta*(d - s[iy])
+    # Clipping prevents states from becoming negative due to bad (Euler) time integration
+    # Also, clipping = equivalent to multiplying R(s) by rhoprime(s) when beta = 0
+    s[ihy] = np.clip(s[ihy], 0, 1)  
+    states.append(np.array(s).flatten().tolist())
+    energies.append(F(s, W, beta, d))
+    
+# Plot states
+t = np.linspace(0,len(states) * eps, len(states))
+fig, ax = plt.subplots(2,1, sharex = True)
+ax[0].plot(t, np.array(states)[:,ih],'r')
+ax[0].plot(t, np.array(states)[:,ix],'g')
+ax[0].plot(t, np.array(states)[:,iy],'b')
+ax[0].set_ylabel('State values')
+
+ax[1].plot(t, np.array(energies),'b')
+ax[1].set_ylabel('Energy F')
+ax[1].set_xlabel('Time (t/tau)')
