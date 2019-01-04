@@ -1,5 +1,4 @@
 import numpy as np
-import itertools
 from matplotlib import pyplot as plt
 
 # TODO / things to try:
@@ -12,24 +11,35 @@ from matplotlib import pyplot as plt
 np.random.seed(seed = 0)
 
 
-layer_sizes = [5, 30, 30, 10]
-#layer_sizes = [7*7, 50, 10]
+layer_sizes = [5, 30,30 , 10]
 layer_indices = np.cumsum([0] + layer_sizes)
 num_neurons = sum(layer_sizes)
-W = np.zeros([num_neurons,num_neurons])
 
-# Initialize weights matrix
-for n in range(len(layer_sizes)-1): # Make weights only exist from one layer to the next
-    wll = np.random.randn(layer_sizes[n+1],layer_sizes[n]) # The weight matrix for one layer to the next
-    wll *= np.sqrt(2/(layer_sizes[n]))     # Glorot-Bengio (Xavier) weight normalization
-#    wll *= 0.2
-    i = layer_indices[n+1]
-    j = layer_indices[n]
-    di = wll.shape[0]
-    dj = wll.shape[1]
-    W[i:i+di, j:j+dj] = wll
-W += W.T # Make weights symmetric
-W = np.matrix(W)
+# Set up indices of neurons for easy access later
+ix = list(range(0, layer_indices[1]))
+iy = list(range(layer_indices[-2], layer_indices[-1]))
+ih = list(range(layer_indices[1], layer_indices[-2]))
+ihy = list(range(layer_indices[1], layer_indices[-1]))
+
+def intialize_weight_matrix(layer_sizes, seed = None):
+    W = np.zeros([num_neurons,num_neurons])
+    connections = np.zeros([num_neurons,num_neurons])
+    # Initialize weights matrix
+    for n in range(len(layer_sizes)-1): # Make weights only exist from one layer to the next
+        wll = np.random.randn(layer_sizes[n+1],layer_sizes[n]) # The weight matrix for one layer to the next
+        wll *= np.sqrt(2/(layer_sizes[n]))     # Glorot-Bengio (Xavier) weight normalization
+    #    wll *= 0.2
+        i = layer_indices[n+1]
+        j = layer_indices[n]
+        di = wll.shape[0]
+        dj = wll.shape[1]
+        W[i:i+di, j:j+dj] = wll
+        connections[i:i+di, j:j+dj] = wll*0 + 1
+    W += W.T # Make weights symmetric
+    connections += connections.T
+    W = np.matrix(W)
+    connections = np.matrix(connections)
+    return W, connections
 
 # Initialize state matrix
 def initialize_state(seed = None):
@@ -37,12 +47,6 @@ def initialize_state(seed = None):
     s = np.random.rand(num_neurons)
     s = np.matrix(s).T
     return s
-
-# Set up indices of neurons for easy access later
-ix = list(range(0, layer_indices[1]))
-iy = list(range(layer_indices[-2], layer_indices[-1]))
-ih = list(range(layer_indices[1], layer_indices[-2]))
-ihy = list(range(layer_indices[1], layer_indices[-1]))
 
 
 def rho(s):
@@ -71,13 +75,14 @@ def step(s, W, eps, beta, d):
     Rs = np.matmul(W,rho(s))
     s[ihy] += eps*(Rs - s)[ihy] # dE/ds term, multiplied by dt (epsilon)
     if beta != 0:
-        s[iy]  += eps*beta*(d - s[iy]) # beta*dC/ds term, multiplied by dt (epsilon)
+        s[iy]  += eps*beta*(d - s[iy]) # beta*dC/ds weak-clamping term, multiplied by dt (epsilon)
     # Clipping prevents states from becoming negative due to bad (Euler) time integration
     # Also, clipping = equivalent to multiplying R(s) by rhoprime(s) when beta = 0
     s[ihy] = np.clip(s[ihy], 0, 1)  
     return s
     
-s = initialize_state(0)
+s = initialize_state(seed = 0)
+W,connections = intialize_weight_matrix(layer_sizes = layer_sizes, seed = 0)
 
 eps = 0.01
 total_tau = 10 # Amount of time to evolve state
@@ -89,6 +94,7 @@ for n in range(num_steps):
     step(s, W, eps = eps, beta = 0, d = None)
     states.append(np.array(s).flatten().tolist())
     energies.append(E(s,W))
+s_free_phase = s.copy()
 
 # Plot states
 t = np.linspace(0,len(states) * eps, len(states))
@@ -112,6 +118,8 @@ for n in range(num_steps):
     step(s, W, eps = eps, beta = beta, d = d)
     states.append(np.array(s).flatten().tolist())
     energies.append(F(s, W, beta, d))
+s_clamped_phase = s.copy()
+
 
 # Plot states
 t = np.linspace(0,len(states) * eps, len(states))
@@ -124,3 +132,20 @@ ax[0].set_ylabel('State values')
 ax[1].plot(t, np.array(energies),'b.-')
 ax[1].set_ylabel('Energy F')
 ax[1].set_xlabel('Time (t/tau)')
+
+
+# Weight update
+
+# Test weight update -- explicit implementation
+dW = W*0
+for i in range(W.shape[0]):
+    for j in range(W.shape[1]):
+        dW[i,j] = 1/beta*( rho(s_clamped_phase[i])*rho(s_clamped_phase[j]) -
+                          rho(s_free_phase[i])*rho(s_free_phase[j])
+                        )
+
+# Compare matrix-multiplication-based weight update
+dW = 1/beta*(rho(s_clamped_phase) @ rho(s_clamped_phase).T -
+             rho(s_free_phase) @ rho(s_free_phase).T
+             )
+#dW = np.multiply(dW, connections)
