@@ -146,7 +146,7 @@ def load():
 # Load mnist data
 x_train, t_train, x_test, t_test = load()
 
-
+# quick
 
 
 # Set parameters
