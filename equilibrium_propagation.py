@@ -11,7 +11,7 @@ from matplotlib import pyplot as plt
 np.random.seed(seed = 0)
 
 
-layer_sizes = [5, 7,9 , 10]
+layer_sizes = [28*28, 50, 50, 10]
 layer_indices = np.cumsum([0] + layer_sizes)
 num_neurons = sum(layer_sizes)
 
@@ -114,19 +114,37 @@ def weight_update(W, W_exists, s_free_phase, s_clamped_phase):
     dW = np.multiply(dW, W_exists)
     return dW
 
+#%% Plot states and energies
+#eps = 0.01
+#s = initialize_state(seed = 0)
+#W,W_exists = intialize_weight_matrix(layer_sizes = layer_sizes, seed = 0)
+#
+#states = []
+#energies = []
+#s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = 10,
+#                         state_list = states, energy_list = energies)
+#s_free_phase = s.copy()
+#plot_states_and_energy(states, energies)
+#
+#s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = 10,
+#                         state_list = states, energy_list = energies)
+#s_clamped_phase = s.copy()
+#plot_states_and_energy(states, energies)
+#
+#dW = weight_update(W, W_exists, s_free_phase, s_clamped_phase)
+
+
+#%% Run algorithm
 
 eps = 0.01
+beta = 1
 s = initialize_state(seed = 0)
 W,W_exists = intialize_weight_matrix(layer_sizes = layer_sizes, seed = 0)
 
-states = []
-energies = []
-s_free_phase = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = 10,
-                         state_list = states, energy_list = energies)
-plot_states_and_energy(states, energies)
+s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = 10)
+s_free_phase = s.copy()
 
-s_clamped_phase = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = 10,
-                         state_list = states, energy_list = energies)
-plot_states_and_energy(states, energies)
+s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = 10)
+s_clamped_phase = s.copy()
 
 dW = weight_update(W, W_exists, s_free_phase, s_clamped_phase)
