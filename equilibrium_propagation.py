@@ -1,6 +1,7 @@
 import numpy as np
 from matplotlib import pyplot as plt
 
+
 # TODO / things to try:
 # - Divide weight matrix by 10
 # - Disable state clipping / allow neuron states to be negative (Bengio STDP-compatible allows it!)
@@ -42,9 +43,10 @@ def intialize_weight_matrix(layer_sizes, seed = None):
     return W, W_exists
 
 # Initialize state matrix
-def initialize_state(seed = None):
+def initialize_state(x = None, seed = None):
     np.random.seed(seed = seed)
     s = np.random.rand(num_neurons)
+    if x is not None: s[ix] = x
     s = np.matrix(s).T
     return s
 
@@ -114,6 +116,7 @@ def weight_update(W, W_exists, s_free_phase, s_clamped_phase):
     dW = np.multiply(dW, W_exists)
     return dW
 
+
 #%% Plot states and energies
 #eps = 0.01
 #s = initialize_state(seed = 0)
@@ -135,16 +138,32 @@ def weight_update(W, W_exists, s_free_phase, s_clamped_phase):
 
 
 #%% Run algorithm
+    
+def load():
+    with open("mnist.pkl",'rb') as f:
+        mnist = pickle.load(f)
+    return mnist["training_images"], mnist["training_labels"], mnist["test_images"], mnist["test_labels"]
+# Load mnist data
+x_train, t_train, x_test, t_test = load()
 
+
+
+
+# Set parameters
 eps = 0.01
+total_tau = 2
 beta = 1
-s = initialize_state(seed = 0)
-W,W_exists = intialize_weight_matrix(layer_sizes = layer_sizes, seed = 0)
 
-s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = 10)
-s_free_phase = s.copy()
+# Select input
+n = 1
+x = x_train[n,:]
+num = t_train[n]
+d = np.zeros([10,1]); d[num] = 1
 
-s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = 10)
-s_clamped_phase = s.copy()
-
+# Perform weight update from one sample
+s = initialize_state(x = x)
+W,W_exists = intialize_weight_matrix(layer_sizes = layer_sizes)
+s_free_phase = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = total_tau).copy()
+s_clamped_phase = evolve_to_equilbrium(s = s, W = W, d = d, beta = beta, eps = eps, total_tau = total_tau).copy()
 dW = weight_update(W, W_exists, s_free_phase, s_clamped_phase)
+W += dW
