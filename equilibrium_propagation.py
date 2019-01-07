@@ -12,7 +12,7 @@ from matplotlib import pyplot as plt
 np.random.seed(seed = 0)
 
 
-layer_sizes = [28*28, 50, 50, 10]
+layer_sizes = [28*28, 50, 10]
 layer_indices = np.cumsum([0] + layer_sizes)
 num_neurons = sum(layer_sizes)
 
@@ -147,23 +147,25 @@ def load():
 x_train, t_train, x_test, t_test = load()
 
 # quick
-
-
-# Set parameters
-eps = 0.01
-total_tau = 2
-beta = 1
-
-# Select input
-n = 1
-x = x_train[n,:]
-num = t_train[n]
-d = np.zeros([10,1]); d[num] = 1
-
-# Perform weight update from one sample
-s = initialize_state(x = x)
-W,W_exists = intialize_weight_matrix(layer_sizes = layer_sizes)
-s_free_phase = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = total_tau).copy()
-s_clamped_phase = evolve_to_equilbrium(s = s, W = W, d = d, beta = beta, eps = eps, total_tau = total_tau).copy()
-dW = weight_update(W, W_exists, s_free_phase, s_clamped_phase)
-W += dW
+dW_list = []
+for n in range(1000):
+    # Set parameters
+    eps = 0.01
+    total_tau = 2
+    beta = 1
+    
+    # Select input
+    m = 1
+    x = x_train[m,:]
+    num = t_train[m]
+    d = np.zeros([10,1]); d[num] = 1
+    
+    # Perform weight update from one sample
+    s = initialize_state(x = x)
+    W,W_exists = intialize_weight_matrix(layer_sizes = layer_sizes)
+    s_free_phase = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = total_tau).copy()
+    s_clamped_phase = evolve_to_equilbrium(s = s, W = W, d = d, beta = beta, eps = eps, total_tau = total_tau).copy()
+    dW = weight_update(W, W_exists, s_free_phase, s_clamped_phase)
+    dW_list.append(dW.std())
+    W += dW
+plot(dW_list)
