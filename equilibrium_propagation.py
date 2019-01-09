@@ -12,7 +12,7 @@ from matplotlib import pyplot as plt
 np.random.seed(seed = 0)
 
 
-layer_sizes = [12, 25, 10]
+layer_sizes = [2, 3, 4]
 layer_indices = np.cumsum([0] + layer_sizes)
 num_neurons = sum(layer_sizes)
 
@@ -50,6 +50,10 @@ def initialize_state(x = None, seed = None):
     s = np.matrix(s).T
     return s
 
+def random_initial_state(batch_size = 7, seed = None):
+    np.random.seed(seed = seed)
+    s = np.random.rand(batch_size, num_neurons)
+    return s
 
 def rho(s):
     return np.clip(s,0,1)
@@ -81,6 +85,21 @@ def step(s, W, eps, beta, d):
     # Clipping prevents states from becoming negative due to bad (Euler) time integration
     # Also, clipping = equivalent to multiplying R(s) by rhoprime(s) when beta = 0
     s[ihy] = np.clip(s[ihy], 0, 1)  
+    return s
+
+def step_batch(s, W, eps, beta, d):
+    # s - shape (batch_size, num_neurons)
+    # W - shape (num_neurons, num_neurons)
+    # beta - constant
+    # d - shape (batch_size, num_neurons)
+    Rs = np.dot(rho(s),W)
+    # Rs - shape (batch_size, num_neurons)
+    s[:,ihy] += eps*(Rs - s)[:,ihy] # dE/ds term, multiplied by dt (epsilon)
+    if beta != 0:
+        s[:,iy]  += eps*beta*(d - s[:,iy]) # beta*dC/ds weak-clamping term, multiplied by dt (epsilon)
+    # Clipping prevents states from becoming negative due to bad (Euler) time integration
+    # Also, clipping = equivalent to multiplying R(s) by rhoprime(s) when beta = 0
+    s[:,ihy] = np.clip(s[:,ihy], 0, 1)  
     return s
     
 def evolve_to_equilbrium(s, W, d, beta, eps, total_tau,
@@ -118,11 +137,32 @@ def weight_update(W, W_exists, beta, s_free_phase, s_clamped_phase):
 
 
 #%% Plot states and energies
-seed = 1
-eps = 0.01
-s = initialize_state(seed = seed)
 W,W_exists = intialize_weight_matrix(layer_sizes = layer_sizes, seed = seed)
 
+
+seed = 1
+eps = 0.01
+s = random_initial_state(batch_size = 7, seed = seed)
+
+s_batch_init = s.copy()
+s = step_batch(s, W, eps, beta = 0, d = None)
+s_batch_step = s.copy()
+
+
+
+seed = 1
+eps = 0.01
+s = random_initial_state(batch_size = 1, seed = seed).T
+
+s_init = s.copy()
+s = step(s, W, eps, beta = 0, d = None)
+s_step = s.copy()
+
+print(all(s_batch_init[0,:] ==s_init.T))
+print(all(s_batch_step[0,:] ==s_step.T))
+
+
+#%%
 states = []
 energies = []
 s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = 10,
