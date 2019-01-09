@@ -38,8 +38,6 @@ def intialize_weight_matrix(layer_sizes, seed = None):
         W_exists[i:i+di, j:j+dj] = wll*0 + 1
     W += W.T # Make weights symmetric
     W_exists += W_exists.T
-    W = np.matrix(W)
-    W_exists = np.matrix(W_exists)
     return W, W_exists
 
 # Initialize state matrix
