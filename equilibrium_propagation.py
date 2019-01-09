@@ -12,7 +12,7 @@ from matplotlib import pyplot as plt
 np.random.seed(seed = 0)
 
 
-layer_sizes = [28*28, 50, 10]
+layer_sizes = [12, 25, 10]
 layer_indices = np.cumsum([0] + layer_sizes)
 num_neurons = sum(layer_sizes)
 
@@ -90,7 +90,7 @@ def evolve_to_equilbrium(s, W, d, beta, eps, total_tau,
     for n in range(num_steps):
         step(s, W, eps = eps, beta = beta, d = d)
         if state_list is not None: states.append(np.array(s).flatten().tolist())
-        if energy_list is not None: energies.append(E(s,W))
+        if energy_list is not None: energies.append(F(s, W, beta, d))
     return s
     
 def plot_states_and_energy(states, energies):
@@ -107,10 +107,10 @@ def plot_states_and_energy(states, energies):
     ax[1].set_xlabel('Time (t/tau)')
 
 # Weight update
-def weight_update(W, W_exists, s_free_phase, s_clamped_phase):
+def weight_update(W, W_exists, beta, s_free_phase, s_clamped_phase):
     # W_exists = matrix of shape(W) with 1s or zeros based on 
     # whether the connection / weight between i and j exists
-    dW = 1/beta*(rho(s_clamped_phase) @ rho(s_clamped_phase).T -
+    dW = 1/beta*(rho(s_clamped_phase) @ rho(s_clamped_phase).T - 
                  rho(s_free_phase) @ rho(s_free_phase).T
                  )
     dW = np.multiply(dW, W_exists)
@@ -118,23 +118,25 @@ def weight_update(W, W_exists, s_free_phase, s_clamped_phase):
 
 
 #%% Plot states and energies
-#eps = 0.01
-#s = initialize_state(seed = 0)
-#W,W_exists = intialize_weight_matrix(layer_sizes = layer_sizes, seed = 0)
-#
-#states = []
-#energies = []
-#s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = 10,
-#                         state_list = states, energy_list = energies)
-#s_free_phase = s.copy()
-#plot_states_and_energy(states, energies)
-#
-#s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = 10,
-#                         state_list = states, energy_list = energies)
-#s_clamped_phase = s.copy()
-#plot_states_and_energy(states, energies)
-#
-#dW = weight_update(W, W_exists, s_free_phase, s_clamped_phase)
+seed = 1
+eps = 0.01
+s = initialize_state(seed = seed)
+W,W_exists = intialize_weight_matrix(layer_sizes = layer_sizes, seed = seed)
+
+states = []
+energies = []
+s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = 10,
+                         state_list = states, energy_list = energies)
+s_free_phase = s.copy()
+
+d = np.zeros([10,1])
+d[3] = 0.5
+s = evolve_to_equilbrium(s = s, W = W, d = d, beta = 1, eps = eps, total_tau = 10,
+                         state_list = states, energy_list = energies)
+s_clamped_phase = s.copy()
+plot_states_and_energy(states, energies)
+
+dW = weight_update(W, W_exists, beta, s_free_phase, s_clamped_phase)
 
 
 #%% Run algorithm
