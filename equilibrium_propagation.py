@@ -5,7 +5,7 @@ from matplotlib import pyplot as plt
 # TODO / things to try:
 # - Divide weight matrix by 10
 # - Disable state clipping / allow neuron states to be negative (Bengio STDP-compatible allows it!)
-# - Try small-world style W_exists (~N/2^k W_exists per layer to layers k distance away)
+# - Try small-world style W_mask (~N/2^k W_mask per layer to layers k distance away)
 
 
 #%% Neuron implementation
@@ -24,7 +24,7 @@ ihy = list(range(layer_indices[1], layer_indices[-1]))
 
 def intialize_weight_matrix(layer_sizes, seed = None):
     W = np.zeros([num_neurons,num_neurons])
-    W_exists = np.zeros(W.shape)
+    W_mask = np.zeros(W.shape)
     # Initialize weights matrix
     for n in range(len(layer_sizes)-1): # Make weights only exist from one layer to the next
         wll = np.random.randn(layer_sizes[n+1],layer_sizes[n]) # The weight matrix for one layer to the next
@@ -35,12 +35,12 @@ def intialize_weight_matrix(layer_sizes, seed = None):
         di = wll.shape[0]
         dj = wll.shape[1]
         W[i:i+di, j:j+dj] = wll
-        W_exists[i:i+di, j:j+dj] = wll*0 + 1
+        W_mask[i:i+di, j:j+dj] = wll*0 + 1
     W += W.T # Make weights symmetric
-    W_exists += W_exists.T
+    W_mask += W_mask.T
 #    W = np.matrix(W)
-#    W_exists = np.matrix(W_exists)
-    return W, W_exists
+#    W_mask = np.matrix(W_mask)
+    return W, W_mask
 
 def random_initial_state(batch_size = 7, seed = None):
     np.random.seed(seed = seed)
@@ -116,13 +116,13 @@ def plot_states_and_energy(states, energies):
         ax[1].set_xlabel('Time (t/tau)')
 
 # Weight update
-def weight_update(W, W_exists, beta, s_free_phase, s_clamped_phase):
-    # W_exists = matrix of shape(W) with 1s or zeros based on 
+def weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase):
+    # W_mask = matrix of shape(W) with 1s or zeros based on 
     # whether the connection / weight between i and j exists
     dW = 1/beta*(rho(s_clamped_phase) @ rho(s_clamped_phase).T - 
                  rho(s_free_phase) @ rho(s_free_phase).T
                  )
-    dW = np.multiply(dW, W_exists)
+    dW = np.multiply(dW, W_mask)
     return dW
 
 
@@ -131,7 +131,7 @@ def weight_update(W, W_exists, beta, s_free_phase, s_clamped_phase):
 seed = 1
 eps = 0.01
 batch_size = 7
-W, W_exists = intialize_weight_matrix(layer_sizes, seed = seed)
+W, W_mask = intialize_weight_matrix(layer_sizes, seed = seed)
 s = random_initial_state(batch_size = batch_size, seed = seed)
 
 states = []
@@ -147,7 +147,7 @@ s = evolve_to_equilbrium(s = s, W = W, d = d, beta = 1, eps = eps, total_tau = 1
 s_clamped_phase = s.copy()
 plot_states_and_energy(states, energies)
 
-#dW = weight_update(W, W_exists, beta, s_free_phase, s_clamped_phase)
+#dW = weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase)
 
 
 #%% Run algorithm
@@ -175,10 +175,10 @@ for n in range(1000):
     
     # Perform weight update from one sample
     s = initialize_state(x = x)
-    W,W_exists = intialize_weight_matrix(layer_sizes = layer_sizes)
+    W,W_mask = intialize_weight_matrix(layer_sizes = layer_sizes)
     s_free_phase = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = total_tau).copy()
     s_clamped_phase = evolve_to_equilbrium(s = s, W = W, d = d, beta = beta, eps = eps, total_tau = total_tau).copy()
-    dW = weight_update(W, W_exists, s_free_phase, s_clamped_phase)
+    dW = weight_update(W, W_mask, s_free_phase, s_clamped_phase)
     dW_list.append(dW.std())
     W += dW
 plot(dW_list)
