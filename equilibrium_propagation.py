@@ -38,8 +38,8 @@ def intialize_weight_matrix(layer_sizes, seed = None):
         W_exists[i:i+di, j:j+dj] = wll*0 + 1
     W += W.T # Make weights symmetric
     W_exists += W_exists.T
-    W = np.matrix(W)
-    W_exists = np.matrix(W_exists)
+#    W = np.matrix(W)
+#    W_exists = np.matrix(W_exists)
     return W, W_exists
 
 # Initialize state matrix
@@ -68,6 +68,13 @@ def E(s, W):
     term2 = -0.5 * rho(s).T @ W @ rho(s)
 #    term3 = -np.sum([b[i]*rho(s[i]) for i in range(len(b))])
     return sum(term1 + term2) # + term3
+
+def E_batch(s, W):
+    term1 = 0.5*np.sum(np.multiply(s,s),axis = 1)
+    term2 = -0.5 * np.sum(np.multiply(rho(s).dot(W),rho(s)),axis = 1)
+#    term3 = -np.sum([b[i]*rho(s[i]) for i in range(len(b))])
+    return term1 + term2 # + term3
+
 
 def C(y, d):
     return 0.5*np.linalg.norm(y-d)**2
@@ -111,6 +118,7 @@ def evolve_to_equilbrium(s, W, d, beta, eps, total_tau,
         if state_list is not None: states.append(np.array(s).flatten().tolist())
         if energy_list is not None: energies.append(F(s, W, beta, d))
     return s
+
     
 def plot_states_and_energy(states, energies):
     # Plot states
@@ -136,31 +144,23 @@ def weight_update(W, W_exists, beta, s_free_phase, s_clamped_phase):
     return dW
 
 
-#%% Plot states and energies
-W,W_exists = intialize_weight_matrix(layer_sizes = layer_sizes, seed = seed)
-
+#%% Testing that E_batch matches E
 
 seed = 1
 eps = 0.01
-s = random_initial_state(batch_size = 7, seed = seed)
+W,W_exists = intialize_weight_matrix(layer_sizes, seed = seed)
+W_matrix = np.matrix(W)
+s = np.matrix(random_initial_state(batch_size = 1, seed = seed).T)
+s_batch = random_initial_state(batch_size = 7, seed = seed)
 
-s_batch_init = s.copy()
-s = step_batch(s, W, eps, beta = 0, d = None)
-s_batch_step = s.copy()
+term1 = sum(0.5*s.T*s)
+term2 = sum(-0.5 * rho(s).T @ W_matrix @ rho(s))
 
+term1_batch = 0.5*np.sum(np.multiply(s_batch,s_batch),axis = 1)
+term2_batch = -0.5 * np.sum(np.multiply(rho(s_batch).dot(W),rho(s_batch)),axis = 1)
 
-
-seed = 1
-eps = 0.01
-s = random_initial_state(batch_size = 1, seed = seed).T
-
-s_init = s.copy()
-s = step(s, W, eps, beta = 0, d = None)
-s_step = s.copy()
-
-print(all(s_batch_init[0,:] ==s_init.T))
-print(all(s_batch_step[0,:] ==s_step.T))
-
+print(E_batch(s_batch,W))
+print(E(s,W))
 
 #%%
 states = []
