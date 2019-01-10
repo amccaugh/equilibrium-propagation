@@ -79,10 +79,18 @@ def E_batch(s, W):
 def C(y, d):
     return 0.5*np.linalg.norm(y-d)**2
 
+def C_batch(y, d):
+    return 0.5*np.linalg.norm(y-d, axis = 1)**2
+
 def F(s, W, beta, d):
     if beta == 0:
         return E(s, W)
     return sum(E(s, W) + beta*C(y = s[iy], d = d)) # + term3
+
+def F_batch(s, W, beta, d):
+    if beta == 0:
+        return E_batch(s, W)
+    return E_batch(s, W) + beta*C_batch(y = s[:,iy], d = d) # + term3
 
 def step(s, W, eps, beta, d):
     Rs = np.matmul(W,rho(s))
@@ -148,19 +156,19 @@ def weight_update(W, W_exists, beta, s_free_phase, s_clamped_phase):
 
 seed = 1
 eps = 0.01
-W,W_exists = intialize_weight_matrix(layer_sizes, seed = seed)
-W_matrix = np.matrix(W)
+batch_size = 7
+W_batch,W_exists = intialize_weight_matrix(layer_sizes, seed = seed)
+W = np.matrix(W_batch)
 s = np.matrix(random_initial_state(batch_size = 1, seed = seed).T)
-s_batch = random_initial_state(batch_size = 7, seed = seed)
+s_batch = random_initial_state(batch_size = batch_size, seed = seed)
 
-term1 = sum(0.5*s.T*s)
-term2 = sum(-0.5 * rho(s).T @ W_matrix @ rho(s))
+d = np.zeros([4,1])
+d[3] = 0.5
+d_batch = np.zeros([batch_size,4])
+d_batch[:,3] = 0.5
 
-term1_batch = 0.5*np.sum(np.multiply(s_batch,s_batch),axis = 1)
-term2_batch = -0.5 * np.sum(np.multiply(rho(s_batch).dot(W),rho(s_batch)),axis = 1)
-
-print(E_batch(s_batch,W))
-print(E(s,W))
+F(s = s, W = W, beta = 1, d = d)
+F_batch(s = s_batch, W = W_batch, beta = 1, d = d_batch)
 
 #%%
 states = []
