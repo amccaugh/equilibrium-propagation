@@ -128,6 +128,20 @@ def weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase):
     return dW
 
 
+def target_matrix(seed = None):
+    np.random.seed(seed = seed)
+    T = np.random.rand(layer_sizes[-1], layer_sizes[0])
+    return T
+    
+    
+def generate_targets(s, T):
+    """ Generates a target of the form y = Tx
+    """
+#    d = np.matmul(T,s[:,iy])
+    x = s[:,ix]
+    d = np.einsum('jk,ik->ij', T, x)
+    return d
+
 #%% Plotting the states and energies of a full batch
 
 seed = 1
