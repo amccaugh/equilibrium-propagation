@@ -119,9 +119,11 @@ def plot_states_and_energy(states, energies):
 def weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase):
     # W_mask = matrix of shape(W) with 1s or zeros based on 
     # whether the connection / weight between i and j exists
-    dW = 1/beta*(rho(s_clamped_phase) @ rho(s_clamped_phase).T - 
-                 rho(s_free_phase) @ rho(s_free_phase).T
+    dW = 1/beta*(
+                 np.einsum('ij,ik->ijk',rho(s_clamped_phase), rho(s_clamped_phase)) - 
+                 np.einsum('ij,ik->ijk',rho(s_free_phase), rho(s_free_phase))
                  )
+#    np.matmul(np.expand_dims(s,2), np.expand_dims(s,1)) # This also works instead of einsum
     dW = np.multiply(dW, W_mask)
     return dW
 
@@ -147,7 +149,7 @@ s = evolve_to_equilbrium(s = s, W = W, d = d, beta = 1, eps = eps, total_tau = 1
 s_clamped_phase = s.copy()
 plot_states_and_energy(states, energies)
 
-#dW = weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase)
+dW = weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase)
 
 
 #%% Run algorithm
