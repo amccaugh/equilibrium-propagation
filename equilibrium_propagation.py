@@ -172,10 +172,12 @@ def generate_targets(s, T):
 
 #%% Run algorithm
 
-seed = 0
+seed = 1
 eps = 0.01
 batch_size = 20
 beta = 0.1
+total_tau = 3
+learning_rate = 1e-3
 W, W_mask = intialize_weight_matrix(layer_sizes, seed = seed)
 T = target_matrix(seed = seed)
 s = random_initial_state(batch_size = batch_size, seed = seed)
@@ -183,27 +185,25 @@ s = random_initial_state(batch_size = batch_size, seed = seed)
 states = []
 energies = []
 costs = []
-for n in range(100):
+for n in range(1000):
     s = random_initial_state(batch_size = batch_size, seed = None)
     x = s[:,ix]
     y = s[:,iy]
     d = generate_targets(s, T)
     
-    s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = 10,
+    s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = total_tau,
                              state_list = None, energy_list = None)
     s_free_phase = s.copy()
     
-    #d = np.zeros([batch_size, layer_sizes[-1]])
-    #d[:,3] = 0.5
-    s = evolve_to_equilbrium(s = s, W = W, d = d, beta = 1, eps = eps, total_tau = 10,
+    s = evolve_to_equilbrium(s = s, W = W, d = d, beta = 1, eps = eps, total_tau = total_tau,
                              state_list = None, energy_list = None)
     s_clamped_phase = s.copy()
 #    plot_states_and_energy(states, energies)
     
-    W = update_weights(W, beta, s_free_phase, s_clamped_phase, learning_rate = 0.01)
+    W = update_weights(W, beta, s_free_phase, s_clamped_phase, learning_rate = 1e-3)
     costs.append(np.mean(C(s[:,iy], d)))
 #    dW = weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase)
 #    W += np.mean(dW, axis = 0)
 
-#plot(costs)
+plot(costs)
 
