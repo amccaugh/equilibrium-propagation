@@ -42,14 +42,6 @@ def intialize_weight_matrix(layer_sizes, seed = None):
 #    W_exists = np.matrix(W_exists)
     return W, W_exists
 
-# Initialize state matrix
-def initialize_state(x = None, seed = None):
-    np.random.seed(seed = seed)
-    s = np.random.rand(num_neurons)
-    if x is not None: s[ix] = x
-    s = np.matrix(s).T
-    return s
-
 def random_initial_state(batch_size = 7, seed = None):
     np.random.seed(seed = seed)
     s = np.random.rand(batch_size, num_neurons)
@@ -64,12 +56,6 @@ def rhoprime(s):
     return rp
 
 def E(s, W):
-    term1 = 0.5*s.T*s
-    term2 = -0.5 * rho(s).T @ W @ rho(s)
-#    term3 = -np.sum([b[i]*rho(s[i]) for i in range(len(b))])
-    return sum(term1 + term2) # + term3
-
-def E_batch(s, W):
     term1 = 0.5*np.sum(np.multiply(s,s),axis = 1)
     term2 = -0.5 * np.sum(np.multiply(rho(s).dot(W),rho(s)),axis = 1)
 #    term3 = -np.sum([b[i]*rho(s[i]) for i in range(len(b))])
@@ -77,32 +63,15 @@ def E_batch(s, W):
 
 
 def C(y, d):
-    return 0.5*np.linalg.norm(y-d)**2
-
-def C_batch(y, d):
     return 0.5*np.linalg.norm(y-d, axis = 1)**2
+
 
 def F(s, W, beta, d):
     if beta == 0:
         return E(s, W)
-    return sum(E(s, W) + beta*C(y = s[iy], d = d)) # + term3
-
-def F_batch(s, W, beta, d):
-    if beta == 0:
-        return E_batch(s, W)
-    return E_batch(s, W) + beta*C_batch(y = s[:,iy], d = d) # + term3
+    return E(s, W) + beta*C(y = s[:,iy], d = d) # + term3
 
 def step(s, W, eps, beta, d):
-    Rs = np.matmul(W,rho(s))
-    s[ihy] += eps*(Rs - s)[ihy] # dE/ds term, multiplied by dt (epsilon)
-    if beta != 0:
-        s[iy]  += eps*beta*(d - s[iy]) # beta*dC/ds weak-clamping term, multiplied by dt (epsilon)
-    # Clipping prevents states from becoming negative due to bad (Euler) time integration
-    # Also, clipping = equivalent to multiplying R(s) by rhoprime(s) when beta = 0
-    s[ihy] = np.clip(s[ihy], 0, 1)  
-    return s
-
-def step_batch(s, W, eps, beta, d):
     # s - shape (batch_size, num_neurons)
     # W - shape (num_neurons, num_neurons)
     # beta - constant
@@ -123,23 +92,28 @@ def evolve_to_equilbrium(s, W, d, beta, eps, total_tau,
     num_steps = int(total_tau/eps)
     for n in range(num_steps):
         step(s, W, eps = eps, beta = beta, d = d)
-        if state_list is not None: states.append(np.array(s).flatten().tolist())
+        if state_list is not None: states.append(np.array(s))
         if energy_list is not None: energies.append(F(s, W, beta, d))
     return s
 
     
 def plot_states_and_energy(states, energies):
-    # Plot states
-    t = np.linspace(0,len(states) * eps, len(states))
-    fig, ax = plt.subplots(2,1, sharex = True)
-    ax[0].plot(t, np.array(states)[:,ih],'r')
-    ax[0].plot(t, np.array(states)[:,ix],'g')
-    ax[0].plot(t, np.array(states)[:,iy],'b')
-    ax[0].set_ylabel('State values')
-    
-    ax[1].plot(t, np.array(energies),'b.-')
-    ax[1].set_ylabel('Energy E')
-    ax[1].set_xlabel('Time (t/tau)')
+    states_batch = states
+    energies_batch = energies
+    for n in range(np.array(states_batch).shape[1]):
+        states = np.array(states_batch)[:,n,:]
+        energies = np.array(energies_batch)[:,n]
+        # Plot states
+        t = np.linspace(0,len(states) * eps, len(states))
+        fig, ax = plt.subplots(2,1, sharex = True)
+        ax[0].plot(t, np.array(states)[:,ih],'r')
+        ax[0].plot(t, np.array(states)[:,ix],'g')
+        ax[0].plot(t, np.array(states)[:,iy],'b')
+        ax[0].set_ylabel('State values')
+        
+        ax[1].plot(t, np.array(energies),'b.-')
+        ax[1].set_ylabel('Energy F')
+        ax[1].set_xlabel('Time (t/tau)')
 
 # Weight update
 def weight_update(W, W_exists, beta, s_free_phase, s_clamped_phase):
@@ -152,39 +126,28 @@ def weight_update(W, W_exists, beta, s_free_phase, s_clamped_phase):
     return dW
 
 
-#%% Testing that E_batch matches E
+#%% Plotting the states and energies of a full batch
 
 seed = 1
 eps = 0.01
 batch_size = 7
-W_batch,W_exists = intialize_weight_matrix(layer_sizes, seed = seed)
-W = np.matrix(W_batch)
-s = np.matrix(random_initial_state(batch_size = 1, seed = seed).T)
-s_batch = random_initial_state(batch_size = batch_size, seed = seed)
+W, W_exists = intialize_weight_matrix(layer_sizes, seed = seed)
+s = random_initial_state(batch_size = batch_size, seed = seed)
 
-d = np.zeros([4,1])
-d[3] = 0.5
-d_batch = np.zeros([batch_size,4])
-d_batch[:,3] = 0.5
-
-F(s = s, W = W, beta = 1, d = d)
-F_batch(s = s_batch, W = W_batch, beta = 1, d = d_batch)
-
-#%%
 states = []
 energies = []
 s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = 10,
                          state_list = states, energy_list = energies)
 s_free_phase = s.copy()
 
-d = np.zeros([10,1])
-d[3] = 0.5
+d = np.zeros([batch_size, layer_sizes[-1]])
+d[:,3] = 0.5
 s = evolve_to_equilbrium(s = s, W = W, d = d, beta = 1, eps = eps, total_tau = 10,
                          state_list = states, energy_list = energies)
 s_clamped_phase = s.copy()
 plot_states_and_energy(states, energies)
 
-dW = weight_update(W, W_exists, beta, s_free_phase, s_clamped_phase)
+#dW = weight_update(W, W_exists, beta, s_free_phase, s_clamped_phase)
 
 
 #%% Run algorithm
