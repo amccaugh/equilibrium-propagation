@@ -129,25 +129,30 @@ def weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase):
 
 
 def target_matrix(seed = None):
+    """ Generates a target of the form y = Tx
+    """
     np.random.seed(seed = seed)
     T = np.random.rand(layer_sizes[-1], layer_sizes[0])
     return T
     
     
 def generate_targets(s, T):
-    """ Generates a target of the form y = Tx
+    """ Creates `d`, the target to which `y` will be weakly-clamped
     """
 #    d = np.matmul(T,s[:,iy])
     x = s[:,ix]
     d = np.einsum('jk,ik->ij', T, x)
     return d
 
+
 #%% Plotting the states and energies of a full batch
 
 seed = 1
 eps = 0.01
 batch_size = 7
+beta = 1
 W, W_mask = intialize_weight_matrix(layer_sizes, seed = seed)
+T = target_matrix(seed = seed)
 s = random_initial_state(batch_size = batch_size, seed = seed)
 
 states = []
@@ -156,14 +161,16 @@ s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau 
                          state_list = states, energy_list = energies)
 s_free_phase = s.copy()
 
-d = np.zeros([batch_size, layer_sizes[-1]])
-d[:,3] = 0.5
+#d = np.zeros([batch_size, layer_sizes[-1]])
+#d[:,3] = 0.5
+d = generate_targets(s, T)
 s = evolve_to_equilbrium(s = s, W = W, d = d, beta = 1, eps = eps, total_tau = 10,
                          state_list = states, energy_list = energies)
 s_clamped_phase = s.copy()
 plot_states_and_energy(states, energies)
 
 dW = weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase)
+W += np.mean(dW, axis = 0)
 
 
 #%% Run algorithm
