@@ -1,6 +1,6 @@
 import numpy as np
 from matplotlib import pyplot as plt
-
+from numba import jit
 
 # TODO / things to try:
 # - Divide weight matrix by 10
@@ -12,15 +12,15 @@ from matplotlib import pyplot as plt
 np.random.seed(seed = 0)
 
 
-layer_sizes = [7, 20, 20, 5]
+layer_sizes = [3, 20, 20, 4]
 layer_indices = np.cumsum([0] + layer_sizes)
 num_neurons = sum(layer_sizes)
 
 # Set up indices of neurons for easy access later
-ix = list(range(0, layer_indices[1]))
-iy = list(range(layer_indices[-2], layer_indices[-1]))
-ih = list(range(layer_indices[1], layer_indices[-2]))
-ihy = list(range(layer_indices[1], layer_indices[-1]))
+ix = slice(0, layer_indices[1])
+iy = slice(layer_indices[-2], layer_indices[-1])
+ih = slice(layer_indices[1], layer_indices[-2])
+ihy = slice(layer_indices[1], layer_indices[-1])
 
 def intialize_weight_matrix(layer_sizes, seed = None):
     W = np.zeros([num_neurons,num_neurons])
@@ -65,7 +65,6 @@ def E(s, W):
 def C(y, d):
     return 0.5*np.linalg.norm(y-d, axis = 1)**2
 
-
 def F(s, W, beta, d):
     if beta == 0:
         return E(s, W)
@@ -79,7 +78,9 @@ def step(s, W, eps, beta, d):
 #    %%timeit
     Rs = np.dot(rho(s),W)
     # Rs - shape (batch_size, num_neurons)
-    s[:,ihy] += eps*(Rs - s)[:,ihy] # dE/ds term, multiplied by dt (epsilon)
+    dEds = eps*(Rs - s) # dE/ds term, multiplied by dt (epsilon)
+    dEds[:,ix] = 0
+    s += dEds
     if beta != 0:
         s[:,iy]  += eps*beta*(d - s[:,iy]) # beta*dC/ds weak-clamping term, multiplied by dt (epsilon)
     # Clipping prevents states from becoming negative due to bad (Euler) time integration
@@ -120,13 +121,34 @@ def plot_states_and_energy(states, energies):
 def weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase):
     # W_mask = matrix of shape(W) with 1s or zeros based on 
     # whether the connection / weight between i and j exists
-    dW = 1/beta*(
-                 np.einsum('ij,ik->ijk',rho(s_clamped_phase), rho(s_clamped_phase)) - 
-                 np.einsum('ij,ik->ijk',rho(s_free_phase), rho(s_free_phase))
-                 )
-#    np.matmul(np.expand_dims(s,2), np.expand_dims(s,1)) # This also works instead of einsum
+#    dW = 1/beta*(
+#                 np.einsum('ij,ik->ijk',rho(s_clamped_phase), rho(s_clamped_phase)) - 
+#                 np.einsum('ij,ik->ijk',rho(s_free_phase), rho(s_free_phase))
+#                 )
+    term1 = np.matmul(np.expand_dims(rho(s_clamped_phase),2), np.expand_dims(rho(s_clamped_phase),1)) # This also works instead of einsum
+    term2 = np.matmul(np.expand_dims(rho(s_free_phase),2), np.expand_dims(rho(s_free_phase),1)) # This also works instead of einsum
+    dW = 1/beta*(term1 - term2)
     dW = np.multiply(dW, W_mask)
     return dW
+
+@jit
+def weight_update_explicit(W, W_mask, beta, s_free_phase, s_clamped_phase):
+    # W_mask = matrix of shape(W) with 1s or zeros based on 
+    # whether the connection / weight between i and j exists
+    dW = np.zeros((batch_size,) + W.shape)
+    rs = rho(s_free_phase)
+    rc = rho(s_clamped_phase)
+    for n in range(batch_size):
+        for i in range(dW.shape[0]):
+            for j in range(dW.shape[1]):
+                dW[n,i,j] = 1/beta*(rc[n,i]*rc[n,j] - rs[n,i]*rs[n,j])
+    dW = np.multiply(dW, W_mask)
+    return dW
+
+def update_weights(W, beta, s_free_phase, s_clamped_phase, learning_rate = 1):
+    dW = weight_update_explicit(W, W_mask, beta, s_free_phase, s_clamped_phase)
+    W += np.mean(dW, axis = 0)*learning_rate
+    return W
 
 
 def target_matrix(seed = None):
@@ -145,20 +167,13 @@ def generate_targets(s, T):
     d = np.einsum('jk,ik->ij', T, x)
     return d
 
-def update_weights(W, beta, s_free_phase, s_clamped_phase, randomize_beta_sign = True):
-    if randomize_beta_sign:
-        if np.random.randn() > 0: beta = -beta
-    dW = weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase)
-    W += np.mean(dW, axis = 0)
-    return W
-
 
 #%% Run algorithm
 
-seed = None
+seed = 0
 eps = 0.01
 batch_size = 20
-beta = 1
+beta = 0.1
 W, W_mask = intialize_weight_matrix(layer_sizes, seed = seed)
 T = target_matrix(seed = seed)
 s = random_initial_state(batch_size = batch_size, seed = seed)
@@ -166,7 +181,7 @@ s = random_initial_state(batch_size = batch_size, seed = seed)
 states = []
 energies = []
 costs = []
-for n in range(100):
+for n in range(1000):
     s = random_initial_state(batch_size = batch_size, seed = None)
     x = s[:,ix]
     y = s[:,iy]
@@ -183,10 +198,16 @@ for n in range(100):
     s_clamped_phase = s.copy()
 #    plot_states_and_energy(states, energies)
     
-    W = update_weights(W, beta, s_free_phase, s_clamped_phase, randomize_beta_sign = True)
+    W = update_weights(W, beta, s_free_phase, s_clamped_phase, learning_rate = 0.01)
     costs.append(np.mean(C(s[:,iy], d)))
 #    dW = weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase)
 #    W += np.mean(dW, axis = 0)
 
-#plot(costs)
+plot(costs)
 
+
+#%%
+
+dW = weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase)
+dW2 = weight_update_explicit(W, W_mask, beta, s_free_phase, s_clamped_phase)
+dWcompare = (dW == dW2)
