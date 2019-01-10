@@ -131,22 +131,22 @@ def weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase):
     dW = np.multiply(dW, W_mask)
     return dW
 
-@jit
-def weight_update_explicit(W, W_mask, beta, s_free_phase, s_clamped_phase):
-    # W_mask = matrix of shape(W) with 1s or zeros based on 
-    # whether the connection / weight between i and j exists
-    dW = np.zeros((batch_size,) + W.shape)
-    rs = rho(s_free_phase)
-    rc = rho(s_clamped_phase)
-    for n in range(batch_size):
-        for i in range(dW.shape[0]):
-            for j in range(dW.shape[1]):
-                dW[n,i,j] = 1/beta*(rc[n,i]*rc[n,j] - rs[n,i]*rs[n,j])
-    dW = np.multiply(dW, W_mask)
-    return dW
+#@jit
+#def weight_update_explicit(W, W_mask, beta, s_free_phase, s_clamped_phase):
+#    # W_mask = matrix of shape(W) with 1s or zeros based on 
+#    # whether the connection / weight between i and j exists
+#    dW = np.zeros((batch_size,) + W.shape)
+#    rs = rho(s_free_phase)
+#    rc = rho(s_clamped_phase)
+#    for n in range(batch_size):
+#        for i in range(dW.shape[0]):
+#            for j in range(dW.shape[1]):
+#                dW[n,i,j] = 1/beta*(rc[n,i]*rc[n,j] - rs[n,i]*rs[n,j])
+#    dW = np.multiply(dW, W_mask)
+#    return dW
 
 def update_weights(W, beta, s_free_phase, s_clamped_phase, learning_rate = 1):
-    dW = weight_update_explicit(W, W_mask, beta, s_free_phase, s_clamped_phase)
+    dW = weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase)
     W += np.mean(dW, axis = 0)*learning_rate
     return W
 
@@ -168,6 +168,8 @@ def generate_targets(s, T):
     return d
 
 
+
+
 #%% Run algorithm
 
 seed = 0
@@ -181,7 +183,7 @@ s = random_initial_state(batch_size = batch_size, seed = seed)
 states = []
 energies = []
 costs = []
-for n in range(1000):
+for n in range(100):
     s = random_initial_state(batch_size = batch_size, seed = None)
     x = s[:,ix]
     y = s[:,iy]
@@ -203,11 +205,5 @@ for n in range(1000):
 #    dW = weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase)
 #    W += np.mean(dW, axis = 0)
 
-plot(costs)
+#plot(costs)
 
-
-#%%
-
-dW = weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase)
-dW2 = weight_update_explicit(W, W_mask, beta, s_free_phase, s_clamped_phase)
-dWcompare = (dW == dW2)
