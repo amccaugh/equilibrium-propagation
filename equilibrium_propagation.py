@@ -6,13 +6,13 @@ from matplotlib import pyplot as plt
 # - Divide weight matrix by 10
 # - Disable state clipping / allow neuron states to be negative (Bengio STDP-compatible allows it!)
 # - Try small-world style W_mask (~N/2^k W_mask per layer to layers k distance away)
-
+# Implement randomize_beta (beta gets chosen from randn(1) and see if it helps
 
 #%% Neuron implementation
 np.random.seed(seed = 0)
 
 
-layer_sizes = [2, 3, 4]
+layer_sizes = [7, 20, 20, 5]
 layer_indices = np.cumsum([0] + layer_sizes)
 num_neurons = sum(layer_sizes)
 
@@ -76,6 +76,7 @@ def step(s, W, eps, beta, d):
     # W - shape (num_neurons, num_neurons)
     # beta - constant
     # d - shape (batch_size, num_neurons)
+#    %%timeit
     Rs = np.dot(rho(s),W)
     # Rs - shape (batch_size, num_neurons)
     s[:,ihy] += eps*(Rs - s)[:,ihy] # dE/ds term, multiplied by dt (epsilon)
@@ -132,7 +133,7 @@ def target_matrix(seed = None):
     """ Generates a target of the form y = Tx
     """
     np.random.seed(seed = seed)
-    T = np.random.rand(layer_sizes[-1], layer_sizes[0])
+    T = np.random.rand(layer_sizes[-1], layer_sizes[0])/5
     return T
     
     
@@ -144,12 +145,19 @@ def generate_targets(s, T):
     d = np.einsum('jk,ik->ij', T, x)
     return d
 
+def update_weights(W, beta, s_free_phase, s_clamped_phase, randomize_beta_sign = True):
+    if randomize_beta_sign:
+        if np.random.randn() > 0: beta = -beta
+    dW = weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase)
+    W += np.mean(dW, axis = 0)
+    return W
 
-#%% Plotting the states and energies of a full batch
 
-seed = 1
+#%% Run algorithm
+
+seed = None
 eps = 0.01
-batch_size = 7
+batch_size = 20
 beta = 1
 W, W_mask = intialize_weight_matrix(layer_sizes, seed = seed)
 T = target_matrix(seed = seed)
@@ -157,51 +165,28 @@ s = random_initial_state(batch_size = batch_size, seed = seed)
 
 states = []
 energies = []
-s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = 10,
-                         state_list = states, energy_list = energies)
-s_free_phase = s.copy()
-
-#d = np.zeros([batch_size, layer_sizes[-1]])
-#d[:,3] = 0.5
-d = generate_targets(s, T)
-s = evolve_to_equilbrium(s = s, W = W, d = d, beta = 1, eps = eps, total_tau = 10,
-                         state_list = states, energy_list = energies)
-s_clamped_phase = s.copy()
-plot_states_and_energy(states, energies)
-
-dW = weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase)
-W += np.mean(dW, axis = 0)
-
-
-#%% Run algorithm
+costs = []
+for n in range(100):
+    s = random_initial_state(batch_size = batch_size, seed = None)
+    x = s[:,ix]
+    y = s[:,iy]
+    d = generate_targets(s, T)
     
-def load():
-    with open("mnist.pkl",'rb') as f:
-        mnist = pickle.load(f)
-    return mnist["training_images"], mnist["training_labels"], mnist["test_images"], mnist["test_labels"]
-# Load mnist data
-x_train, t_train, x_test, t_test = load()
+    s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = 10,
+                             state_list = None, energy_list = None)
+    s_free_phase = s.copy()
+    
+    #d = np.zeros([batch_size, layer_sizes[-1]])
+    #d[:,3] = 0.5
+    s = evolve_to_equilbrium(s = s, W = W, d = d, beta = 1, eps = eps, total_tau = 10,
+                             state_list = None, energy_list = None)
+    s_clamped_phase = s.copy()
+#    plot_states_and_energy(states, energies)
+    
+    W = update_weights(W, beta, s_free_phase, s_clamped_phase, randomize_beta_sign = True)
+    costs.append(np.mean(C(s[:,iy], d)))
+#    dW = weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase)
+#    W += np.mean(dW, axis = 0)
 
-# quick
-dW_list = []
-for n in range(1000):
-    # Set parameters
-    eps = 0.01
-    total_tau = 2
-    beta = 1
-    
-    # Select input
-    m = 1
-    x = x_train[m,:]
-    num = t_train[m]
-    d = np.zeros([10,1]); d[num] = 1
-    
-    # Perform weight update from one sample
-    s = initialize_state(x = x)
-    W,W_mask = intialize_weight_matrix(layer_sizes = layer_sizes)
-    s_free_phase = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = total_tau).copy()
-    s_clamped_phase = evolve_to_equilbrium(s = s, W = W, d = d, beta = beta, eps = eps, total_tau = total_tau).copy()
-    dW = weight_update(W, W_mask, s_free_phase, s_clamped_phase)
-    dW_list.append(dW.std())
-    W += dW
-plot(dW_list)
+#plot(costs)
+
