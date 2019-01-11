@@ -27,13 +27,15 @@ iy = slice(layer_indices[-2], layer_indices[-1])
 ih = slice(layer_indices[1], layer_indices[-2])
 ihy = slice(layer_indices[1], layer_indices[-1])
 
-# Create masks for state
+# Create masks for state, because updating slices of a matrix is slow
 mx = torch.zeros([1, num_neurons])
 my = torch.zeros([1, num_neurons])
 mh = torch.zeros([1, num_neurons])
+mhy = torch.zeros([1, num_neurons])
 mx[:,ix] = 1
 my[:,iy] = 1
 mh[:,ih] = 1
+mhy[:,ihy] = 1
 
 def intialize_weight_matrix(layer_sizes, seed = None):
     np.random.seed(seed = 0)
@@ -96,7 +98,28 @@ def step(s, W, eps, beta, d):
     # beta - constant
     # d - shape (batch_size, num_neurons)
 #    %%timeit
-    Rs = (W @ s.unsqueeze(2)).squeeze()
+    Rs = (W @ rho(s).unsqueeze(2)).squeeze()
+    # Rs - shape (batch_size, num_neurons)
+    dEds = eps*(Rs - s) # dE/ds term, multiplied by dt (epsilon)
+    dEds *= mhy # Mask dEds so it only adds to h and y units
+    s += dEds
+    if beta != 0:
+        dCds = eps*beta*(d - s) # beta*dC/ds weak-clamping term, mul tiplied by dt (epsilon)
+        dCds *= my # Mask dCds so it only adds to y (output) units
+        s += dCds
+    # Clipping prevents states from becoming negative due to bad (Euler) time integration
+    # Also, clipping = equivalent to multiplying R(s) by rhoprime(s) when beta = 0
+
+    s = torch.clamp(s, 0, 1)
+    return s
+
+def step_old(s, W, eps, beta, d):
+    # s - shape (batch_size, num_neurons)
+    # W - shape (num_neurons, num_neurons)
+    # beta - constant
+    # d - shape (batch_size, num_neurons)
+#    %%timeit
+    Rs = np.dot(np.clip(s,0,1),W)
     # Rs - shape (batch_size, num_neurons)
     dEds = eps*(Rs - s) # dE/ds term, multiplied by dt (epsilon)
     dEds[:,ix] = 0
@@ -105,8 +128,7 @@ def step(s, W, eps, beta, d):
         s[:,iy]  += eps*beta*(d - s[:,iy]) # beta*dC/ds weak-clamping term, multiplied by dt (epsilon)
     # Clipping prevents states from becoming negative due to bad (Euler) time integration
     # Also, clipping = equivalent to multiplying R(s) by rhoprime(s) when beta = 0
-
-    s[:,ihy] = torch.clamp(s[:,ihy], 0, 1)
+    s[:,ihy] = np.clip(s[:,ihy], 0, 1)  
     return s
 
 def evolve_to_equilbrium(s, W, d, beta, eps, total_tau,
@@ -167,21 +189,24 @@ def generate_targets(s, T):
     """
 #    d = np.matmul(T,s[:,iy])
     x = s[:,ix].unsqueeze(2)
-    d = torch.matmul(T,x).squeeze()
+    d_values = torch.matmul(T,x).squeeze()
+    d = torch.zeros(s.shape)
+    d[:,iy] = d_values
     return d
 
-#y = s[:,iy]
-#y_old = y.numpy()
-#s_old = s.numpy()
-#T_old = T.squeeze().numpy()
-#W_old = W.squeeze().numpy()
-#d = generate_targets(s,T)
-#d_old =  generate_targets_old(s_old, T_old)
-#C_old(y_old, d_old)
-#C(y,d)
-#s1 = step(s,W,0.1,0.7,d)
-#s2 = step_old(s_old,W_old,0.1,0.7,d_old)
-#np.allclose(s1.numpy(),s2)
+y = s[:,iy]
+y_old = y.numpy().copy()
+s_old = s.numpy().copy()
+T_old = T.squeeze().numpy()
+W_old = W.squeeze().numpy()
+y = s*my
+d = generate_targets(s,T)
+d_old =  generate_targets_old(s_old, T_old)
+print(C_old(y_old, d_old))
+print(C(y,d))
+s1 = step(s,W,0.1,0.0,d).numpy().copy()
+s2 = step_old(s_old,W_old,0.1,0.0,d_old)
+np.allclose(s1,s2)
 
 #%% Run algorithm
 
