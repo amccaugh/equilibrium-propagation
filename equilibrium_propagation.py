@@ -79,12 +79,13 @@ def E(s, W):
     term2 = -0.5 * torch.sum(term2, dim = [1,2])
 #    term3 = -np.sum([b[i]*rho(s[i]) for i in range(len(b))])
     return term1 + term2 # + term3
-#
-#def C(y, d):
-#    return 0.5*np.linalg.norm(y-d, axis = 1)**2
+
+def C_old(y, d):
+    return 0.5*np.linalg.norm(y-d, axis = 1)**2
     
 def C(y, d):
-    return 0.5*np.linalg.norm(y-d, axis = 1)**2
+    return 0.5*torch.norm(y-d, dim = 1)**2
+
 
 def F(s, W, beta, d):
     if beta == 0:
@@ -180,13 +181,13 @@ def target_matrix(seed = None):
     return T
     
     
-#def generate_targets_old(s, T):
-#    """ Creates `d`, the target to which `y` will be weakly-clamped
-#    """
-##    d = np.matmul(T,s[:,iy])
-#    x = s[:,ix]
-#    d = np.einsum('jk,ik->ij', T, x)
-#    return d
+def generate_targets_old(s, T):
+    """ Creates `d`, the target to which `y` will be weakly-clamped
+    """
+#    d = np.matmul(T,s[:,iy])
+    x = s[:,ix]
+    d = np.einsum('jk,ik->ij', T, x)
+    return d
     
 def generate_targets(s, T):
     """ Creates `d`, the target to which `y` will be weakly-clamped
@@ -197,7 +198,14 @@ def generate_targets(s, T):
     return d
 
 
-
+y = s[:,iy]
+y_old = y.numpy()
+s_old = s.numpy()
+T_old = T.squeeze().numpy()
+d = generate_targets(s,T)
+d_old =  generate_targets_old(s_old, T_old)
+C_old(y_old, d_old)
+C(y,d)
 
 #%% Run algorithm
 
