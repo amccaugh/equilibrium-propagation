@@ -2,8 +2,8 @@ import numpy as np
 from matplotlib import pyplot as plt
 import torch
 
-#device = torch.device('cpu'); torch.set_default_tensor_type(torch.FloatTensor)
-device = torch.device('cuda'); torch.set_default_tensor_type(torch.cuda.FloatTensor)
+device = torch.device('cpu'); torch.set_default_tensor_type(torch.FloatTensor)
+#device = torch.device('cuda'); torch.set_default_tensor_type(torch.cuda.FloatTensor)
 torch.set_default_dtype(torch.float)
 dtype = torch.float
 
@@ -26,7 +26,7 @@ dtype = torch.float
 # Helpful short and to-the-point torch tutorial: https://jhui.github.io/2018/02/09/PyTorch-Basic-operations/
 torch.manual_seed(seed = 0)
 
-layer_sizes = [3, 100, 100, 4]
+layer_sizes = [3, 20, 20, 4]
 layer_indices = np.cumsum([0] + layer_sizes)
 num_neurons = sum(layer_sizes)
 
@@ -70,8 +70,7 @@ def intialize_weight_matrix(layer_sizes, seed = None):
     W_mask = W_mask.unsqueeze(0)
     return W, W_mask
 
-def random_initial_state(batch_size = 7, seed = None):
-    torch.manual_seed(seed = seed)
+def random_initial_state(batch_size = 7):
     s = torch.rand(batch_size, num_neurons)
     return s
 
@@ -103,7 +102,7 @@ def C(s, d):
 def F(s, W, beta, d):
     if beta == 0:
         return E(s, W)
-    return E(s, W) + beta*C(y = s[:,iy], d = d) # + term3
+    return E(s, W) + beta*C(s, d = d) # + term3
 
 def step(s, W, eps, beta, d):
     # s - shape (batch_size, num_neurons)
@@ -123,7 +122,7 @@ def step(s, W, eps, beta, d):
         s += dCds
     # Clipping prevents states from becoming negative due to bad (Euler) time integration
     # Also, clipping = equivalent to multiplying R(s) by rhoprime(s) when beta = 0
-    s = torch.clamp(s, 0, 1)
+    torch.clamp(s, 0, 1, out = s)
     return s
 
 
@@ -133,8 +132,8 @@ def evolve_to_equilbrium(s, W, d, beta, eps, total_tau,
     num_steps = int(total_tau/eps)
     for n in range(num_steps):
         step(s, W, eps = eps, beta = beta, d = d)
-        if state_list is not None: states.append(s.numpy())
-        if energy_list is not None: energies.append(F(s, W, beta, d))
+        if state_list is not None: states.append(s.numpy().copy())
+        if energy_list is not None: energies.append(F(s, W, beta, d).numpy().copy())
     return s
 
     
@@ -222,38 +221,60 @@ def generate_targets(s, T):
 
 seed = 2
 eps = 0.01
-batch_size = 20
+batch_size = 1
 beta = 0.1
-total_tau = 3
-learning_rate = 1e-3
+total_tau = 10
+learning_rate = 1e-2
 W, W_mask = intialize_weight_matrix(layer_sizes, seed = seed)
 T = target_matrix(seed = seed)
-s = random_initial_state(batch_size = batch_size, seed = seed)
 
 states = []
 energies = []
 costs = []
 for n in range(100):
-    s = random_initial_state(batch_size = batch_size, seed = np.random.randint(1e9))
-#    x = s[:,ix]
-#    y = s[:,iy]
+    s = random_initial_state(batch_size = batch_size)
     d = generate_targets(s, T)
     
-    s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = total_tau,
-                             state_list = None, energy_list = None)
+    s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = total_tau)
+#                             state_list = states, energy_list = energies)
     s_free_phase = s.clone()
     
-    s = evolve_to_equilbrium(s = s, W = W, d = d, beta = 1, eps = eps, total_tau = total_tau,
-                             state_list = None, energy_list = None)
+    s = evolve_to_equilbrium(s = s, W = W, d = d, beta = 1, eps = eps, total_tau = total_tau)
+#                             state_list = states, energy_list = energies)
     s_clamped_phase = s.clone()
 #    plot_states_and_energy(states, energies)
     
     W = update_weights(W, beta, s_free_phase, s_clamped_phase, learning_rate = 1e-3)
     costs.append(torch.mean(C(s, d)).item())
-#    dW = weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase)
-#    W += np.mean(dW, axis = 0)
 
-#plot(costs)
+plot(costs)
 
-#%%
-[print(v.device) for v in [W,W_mask,s,d,s_free_phase,s_clamped_phase,T]]
+#%% Plot energies
+#seed = 1
+#eps = 0.01
+#batch_size = 1
+#beta = 0.1
+#total_tau = 10
+#learning_rate = 1e-3
+#W, W_mask = intialize_weight_matrix(layer_sizes, seed = seed)
+#T = target_matrix(seed = seed)
+#
+#states = []
+#energies = []
+#costs = []
+#s = random_initial_state(batch_size = batch_size)
+##    x = s[:,ix]
+##    y = s[:,iy]
+#d = generate_targets(s, T)
+#
+#s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = total_tau,
+#                     state_list = states, energy_list = energies)
+#s_free_phase = s.clone()
+#
+#s = evolve_to_equilbrium(s = s, W = W, d = d, beta = 1, eps = eps, total_tau = total_tau,
+#                     state_list = states, energy_list = energies)
+#s_clamped_phase = s.clone()
+#plot_states_and_energy(states, energies)
+#
+#W = update_weights(W, beta, s_free_phase, s_clamped_phase, learning_rate = 1e-3)
+#costs.append(torch.mean(C(s, d)).item())
