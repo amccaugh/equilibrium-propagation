@@ -64,11 +64,12 @@ def rhoprime(s):
     rp[(0<=s) & (s<=1)] = 1 # SUPER IMPORTANT! if (0<s) & (s<1) zeros + ones cannot escape
     return rp
 
-#def E(s, W):
+#def E_old(s, W):
 #    term1 = 0.5*np.sum(np.multiply(s,s),axis = 1)
 #    term2 = -0.5 * np.sum(np.multiply(rho(s).dot(W),rho(s)),axis = 1)
 ##    term3 = -np.sum([b[i]*rho(s[i]) for i in range(len(b))])
 #    return term1 + term2 # + term3
+#np.allclose(E_old(s.numpy(), W.squeeze().numpy()), E(s,W).numpy())
 
 def E(s, W):
     term1 = 0.5*torch.sum(s*s, dim = 1)
