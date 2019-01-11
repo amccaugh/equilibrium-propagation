@@ -2,7 +2,8 @@ import numpy as np
 from matplotlib import pyplot as plt
 import torch
 
-device = torch.device("cpu")
+#device = torch.device('cpu'); torch.set_default_tensor_type(torch.FloatTensor)
+device = torch.device('cuda'); torch.set_default_tensor_type(torch.cuda.FloatTensor)
 torch.set_default_dtype(torch.float)
 dtype = torch.float
 
@@ -12,12 +13,20 @@ dtype = torch.float
 # - Try small-world style W_mask (~N/2^k W_mask per layer to layers k distance away)
 # Implement randomize_beta (beta gets chosen from randn(1) and see if it helps
 
+#%% Check pytorch can use GPU - https://stackoverflow.com/questions/48152674/how-to-check-if-pytorch-is-using-the-gpu
+#torch.cuda.current_device()
+#torch.cuda.device(0)
+#torch.cuda.device_count()
+#torch.cuda.get_device_name(0)
+#torch.cuda.empty_cache()
+
+
 #%% Neuron implementation
 # Following pytorch example from https://pytorch.org/tutorials/beginner/pytorch_with_examples.html
 # Helpful short and to-the-point torch tutorial: https://jhui.github.io/2018/02/09/PyTorch-Basic-operations/
 torch.manual_seed(seed = 0)
 
-layer_sizes = [3, 20, 20, 4]
+layer_sizes = [3, 100, 100, 4]
 layer_indices = np.cumsum([0] + layer_sizes)
 num_neurons = sum(layer_sizes)
 
@@ -54,8 +63,8 @@ def intialize_weight_matrix(layer_sizes, seed = None):
         W_mask[i:i+di, j:j+dj] = wll*0 + 1
     W += W.T # Make weights symmetric
     W_mask += W_mask.T
-    W = torch.from_numpy(W).float() # Convert to float Tensor
-    W_mask = torch.from_numpy(W_mask).float() # .byte() is the closest thing to a boolean tensor pytorch has
+    W = torch.from_numpy(W).float().to(device) # Convert to float Tensor
+    W_mask = torch.from_numpy(W_mask).float().to(device) # .byte() is the closest thing to a boolean tensor pytorch has
      # Line up dimensions so that the zeroth dimension is the batch #
     W = W.unsqueeze(0)
     W_mask = W_mask.unsqueeze(0)
@@ -86,7 +95,8 @@ def E(s, W):
 #    term3 = -np.sum([b[i]*rho(s[i]) for i in range(len(b))])
     return term1 + term2 # + term3
     
-def C(y, d):
+def C(s, d):
+    y = s*my
     return 0.5*torch.norm(y-d, dim = 1)**2
 
 
@@ -101,7 +111,8 @@ def step(s, W, eps, beta, d):
     # beta - constant
     # d - shape (batch_size, num_neurons)
 #    %%timeit
-    Rs = (W @ rho(s).unsqueeze(2)).squeeze()
+#    Rs = (W @ rho(s).unsqueeze(2)).squeeze() # Slow, correct
+    Rs = (rho(s) @ W).squeeze() # Fast, but reliant on W being symmetric
     # Rs - shape (batch_size, num_neurons)
     dEds = eps*(Rs - s) # dE/ds term, multiplied by dt (epsilon)
     dEds *= mhy # Mask dEds so it only adds to h and y units
@@ -122,7 +133,7 @@ def evolve_to_equilbrium(s, W, d, beta, eps, total_tau,
     num_steps = int(total_tau/eps)
     for n in range(num_steps):
         step(s, W, eps = eps, beta = beta, d = d)
-        if state_list is not None: states.append(np.array(s))
+        if state_list is not None: states.append(s.numpy())
         if energy_list is not None: energies.append(F(s, W, beta, d))
     return s
 
@@ -145,15 +156,15 @@ def plot_states_and_energy(states, energies):
         ax[1].set_ylabel('Energy F')
         ax[1].set_xlabel('Time (t/tau)')
 
-# Weight update
-def weight_update_old(W, W_mask, beta, s_free_phase, s_clamped_phase):
-    # W_mask = matrix of shape(W) with 1s or zeros based on 
-    # whether the connection / weight between i and j exists
-    term1 = np.matmul(np.expand_dims(rho_old(s_clamped_phase),2), np.expand_dims(rho_old(s_clamped_phase),1)) # This also works instead of einsum
-    term2 = np.matmul(np.expand_dims(rho_old(s_free_phase),2), np.expand_dims(rho_old(s_free_phase),1)) # This also works instead of einsum
-    dW = 1/beta*(term1 - term2)
-    dW = np.multiply(dW, W_mask)
-    return dW
+## Weight update
+#def weight_update_old(W, W_mask, beta, s_free_phase, s_clamped_phase):
+#    # W_mask = matrix of shape(W) with 1s or zeros based on 
+#    # whether the connection / weight between i and j exists
+#    term1 = np.matmul(np.expand_dims(rho_old(s_clamped_phase),2), np.expand_dims(rho_old(s_clamped_phase),1)) # This also works instead of einsum
+#    term2 = np.matmul(np.expand_dims(rho_old(s_free_phase),2), np.expand_dims(rho_old(s_free_phase),1)) # This also works instead of einsum
+#    dW = 1/beta*(term1 - term2)
+#    dW = np.multiply(dW, W_mask)
+#    return dW
 
 # Weight update
 def weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase):
@@ -168,7 +179,7 @@ def weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase):
 
 def update_weights(W, beta, s_free_phase, s_clamped_phase, learning_rate = 1):
     dW = weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase)
-    W += np.mean(dW, axis = 0)*learning_rate
+    W += torch.mean(dW, dim = 0)*learning_rate
     return W
 
 
@@ -191,25 +202,25 @@ def generate_targets(s, T):
     return d
 
 
-W, W_mask = intialize_weight_matrix(layer_sizes, seed = 0)
-W_old = W.squeeze().numpy()
-W_mask_old = W_mask.squeeze().numpy()
-
-s = random_initial_state(batch_size = batch_size, seed = 0)
-s_free_phase_old = s.numpy().copy()
-s_free_phase = s.clone()
-
-s = random_initial_state(batch_size = batch_size, seed = 1)
-s_clamped_phase_old = s.numpy().copy()
-s_clamped_phase = s.clone()
-
-dW_old = weight_update_old(W_old, W_mask_old, 0.7, s_free_phase_old, s_clamped_phase_old)
-dW = weight_update(W, W_mask, 0.7, s_free_phase, s_clamped_phase)
-print(np.allclose(dW.numpy(), dW_old))
+#W, W_mask = intialize_weight_matrix(layer_sizes, seed = 0)
+#W_old = W.squeeze().numpy()
+#W_mask_old = W_mask.squeeze().numpy()
+#
+#s = random_initial_state(batch_size = batch_size, seed = 0)
+#s_free_phase_old = s.numpy().copy()
+#s_free_phase = s.clone()
+#
+#s = random_initial_state(batch_size = batch_size, seed = 1)
+#s_clamped_phase_old = s.numpy().copy()
+#s_clamped_phase = s.clone()
+#
+#dW_old = weight_update_old(W_old, W_mask_old, 0.7, s_free_phase_old, s_clamped_phase_old)
+#dW = weight_update(W, W_mask, 0.7, s_free_phase, s_clamped_phase)
+#print(np.allclose(dW.numpy(), dW_old))
 
 #%% Run algorithm
 
-seed = 1
+seed = 2
 eps = 0.01
 batch_size = 20
 beta = 0.1
@@ -222,25 +233,27 @@ s = random_initial_state(batch_size = batch_size, seed = seed)
 states = []
 energies = []
 costs = []
-for n in range(1000):
-    s = random_initial_state(batch_size = batch_size, seed = None)
-    x = s[:,ix]
-    y = s[:,iy]
+for n in range(100):
+    s = random_initial_state(batch_size = batch_size, seed = np.random.randint(1e9))
+#    x = s[:,ix]
+#    y = s[:,iy]
     d = generate_targets(s, T)
     
     s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = total_tau,
                              state_list = None, energy_list = None)
-    s_free_phase = s.copy()
+    s_free_phase = s.clone()
     
     s = evolve_to_equilbrium(s = s, W = W, d = d, beta = 1, eps = eps, total_tau = total_tau,
                              state_list = None, energy_list = None)
-    s_clamped_phase = s.copy()
+    s_clamped_phase = s.clone()
 #    plot_states_and_energy(states, energies)
     
     W = update_weights(W, beta, s_free_phase, s_clamped_phase, learning_rate = 1e-3)
-    costs.append(np.mean(C(s[:,iy], d)))
+    costs.append(torch.mean(C(s, d)).item())
 #    dW = weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase)
 #    W += np.mean(dW, axis = 0)
 
-plot(costs)
+#plot(costs)
 
+#%%
+[print(v.device) for v in [W,W_mask,s,d,s_free_phase,s_clamped_phase,T]]
