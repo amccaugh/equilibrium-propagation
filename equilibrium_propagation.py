@@ -1,9 +1,11 @@
 import numpy as np
 from matplotlib import pyplot as plt
 import torch
+from torchvision import datasets, transforms
+import os
 
-device = torch.device('cpu'); torch.set_default_tensor_type(torch.FloatTensor)
-#device = torch.device('cuda'); torch.set_default_tensor_type(torch.cuda.FloatTensor)
+#device = torch.device('cpu'); torch.set_default_tensor_type(torch.FloatTensor)
+device = torch.device('cuda'); torch.set_default_tensor_type(torch.cuda.FloatTensor)
 torch.set_default_dtype(torch.float)
 dtype = torch.float
 
@@ -26,7 +28,7 @@ dtype = torch.float
 # Helpful short and to-the-point torch tutorial: https://jhui.github.io/2018/02/09/PyTorch-Basic-operations/
 torch.manual_seed(seed = 0)
 
-layer_sizes = [3, 100, 100, 4]
+layer_sizes = [28*28, 100, 10]
 layer_indices = np.cumsum([0] + layer_sizes)
 num_neurons = sum(layer_sizes)
 
@@ -182,23 +184,67 @@ def update_weights(W, beta, s_free_phase, s_clamped_phase, learning_rate = 1):
     return W
 
 
-def target_matrix(seed = None):
-    """ Generates a target of the form y = Tx
-    """
-    torch.manual_seed(seed = seed)
-    T = torch.rand((1, layer_sizes[-1], layer_sizes[0]), dtype = dtype)/5
-    return T
+#def target_matrix(seed = None):
+#    """ Generates a target of the form y = Tx
+#    """
+#    torch.manual_seed(seed = seed)
+#    T = torch.rand((1, layer_sizes[-1], layer_sizes[0]), dtype = dtype)/5
+#    return T
     
     
-def generate_targets(s, T):
-    """ Creates `d`, the target to which `y` will be weakly-clamped
-    """
-#    d = np.matmul(T,s[:,iy])
-    x = s[:,ix].unsqueeze(2)
-    d_values = torch.matmul(T,x).squeeze()
+#def generate_targets(s, T):
+#    """ Creates `d`, the target to which `y` will be weakly-clamped
+#    """
+##    d = np.matmul(T,s[:,iy])
+#    x = s[:,ix].unsqueeze(2)
+#    d_values = torch.matmul(T,x).squeeze()
+#    d = torch.zeros(s.shape)
+#    d[:,iy] = d_values
+#    return d
+
+
+def train_batch(s,W,d, beta, eps, total_tau, learning_rate):
+    s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = total_tau)
+    s_free_phase = s.clone()
+    
+    s = evolve_to_equilbrium(s = s, W = W, d = d, beta = 1, eps = eps, total_tau = total_tau)
+    s_clamped_phase = s.clone()
+    
+    W = update_weights(W, beta, s_free_phase, s_clamped_phase, learning_rate = learning_rate)
+    return s, W
+
+
+def convert_dataset_batch(data, target, batch_size):
+    """ Convert the dataset "data" and "target" variables to s and d """
+    data, target = data.to(device), target.to(device)
+    data = data.reshape([batch_size, 28*28]) # Flatten
+    d_target = torch.zeros([batch_size, 10])
+    for n in range(batch_size):
+        d_target[n, target[n]] = 1 # Convert to one-hot
+        
+    # Setup intitial state s and target d
+    s = random_initial_state(batch_size = batch_size)
+    s[:,ix] = data
     d = torch.zeros(s.shape)
-    d[:,iy] = d_values
-    return d
+    d[:,iy] = d_target
+    return s,d
+
+
+def validate(dataset, num_samples_to_test = 1000):
+    """ Returns the % error validated against the training or test dataset """
+    batch_size = 1000
+    train_loader = torch.utils.data.DataLoader(dataset = dataset, batch_size=batch_size, shuffle=True)
+    num_samples_evaluated = 0
+    num_correct = 0
+    for batch_idx, (data, target) in enumerate(train_loader):
+        s,d = convert_dataset_batch(data,target, batch_size)
+        s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = total_tau)
+        compared = s[:,iy].argmax(dim = 1) == d[:,iy].argmax(dim = 1)
+        num_samples_evaluated += batch_size
+        num_correct += torch.sum(compared)
+        if num_samples_evaluated > num_samples_to_test:
+            break
+    return (1-num_correct.item()/num_samples_evaluated)*100
 
 
 #W, W_mask = intialize_weight_matrix(layer_sizes, seed = 0)
@@ -219,33 +265,33 @@ def generate_targets(s, T):
 
 #%% Run algorithm
 
-seed = 2
-eps = 0.01
-batch_size = 20
-beta = 0.1
-total_tau = 10
-learning_rate = 1e-2
-W, W_mask = intialize_weight_matrix(layer_sizes, seed = seed)
-T = target_matrix(seed = seed)
-
-states = []
-energies = []
-costs = []
-for n in range(100):
-    s = random_initial_state(batch_size = batch_size)
-    d = generate_targets(s, T)
-    
-    s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = total_tau)
-#                             state_list = states, energy_list = energies)
-    s_free_phase = s.clone()
-    
-    s = evolve_to_equilbrium(s = s, W = W, d = d, beta = 1, eps = eps, total_tau = total_tau)
-#                             state_list = states, energy_list = energies)
-    s_clamped_phase = s.clone()
-#    plot_states_and_energy(states, energies)
-    
-    W = update_weights(W, beta, s_free_phase, s_clamped_phase, learning_rate = learning_rate)
-    costs.append(torch.mean(C(s, d)).item())
+#seed = 2
+#eps = 0.01
+#batch_size = 20
+#beta = 0.1
+#total_tau = 10
+#learning_rate = 1e-2
+#W, W_mask = intialize_weight_matrix(layer_sizes, seed = seed)
+#T = target_matrix(seed = seed)
+#
+#states = []
+#energies = []
+#costs = []
+#for n in range(100):
+#    s = random_initial_state(batch_size = batch_size)
+#    d = generate_targets(s, T)
+#    
+#    s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = total_tau)
+##                             state_list = states, energy_list = energies)
+#    s_free_phase = s.clone()
+#    
+#    s = evolve_to_equilbrium(s = s, W = W, d = d, beta = 1, eps = eps, total_tau = total_tau)
+##                             state_list = states, energy_list = energies)
+#    s_clamped_phase = s.clone()
+##    plot_states_and_energy(states, energies)
+#    
+#    W = update_weights(W, beta, s_free_phase, s_clamped_phase, learning_rate = learning_rate)
+#    costs.append(torch.mean(C(s, d)).item())
 
 #plot(costs)
 
@@ -278,3 +324,47 @@ for n in range(100):
 #
 #W = update_weights(W, beta, s_free_phase, s_clamped_phase, learning_rate = 1e-3)
 #costs.append(torch.mean(C(s, d)).item())
+    
+#%% Thing
+
+    
+seed = 2
+eps = 0.5
+batch_size = 20
+beta = 0.1
+total_tau = 10
+learning_rate = 0.01
+W, W_mask = intialize_weight_matrix(layer_sizes, seed = seed)
+#T = target_matrix(seed = seed)
+
+# Setup MNIST data loader
+data_path = os.path.realpath('./mnist_data/')
+train_dataset = datasets.MNIST(data_path, train=True, download=True,
+                   transform=transforms.Compose([
+                       transforms.ToTensor(),
+#                       transforms.Normalize((0.5,), (0.3081,))
+                   ]))
+test_dataset = datasets.MNIST(data_path, train=True, download=True,
+                   transform=transforms.Compose([
+                       transforms.ToTensor(),
+#                       transforms.Normalize((0.5,), (0.3081,))
+                   ]))
+train_loader = torch.utils.data.DataLoader(dataset = dataset, batch_size=batch_size, shuffle=True)
+
+# Run training loop
+costs = []
+for batch_idx, (data, target) in enumerate(train_loader):
+    epoch = 1
+    s,d = convert_dataset_batch(data,target, batch_size)
+    s,W = train_batch(s, W, d, beta, eps, total_tau, learning_rate)
+    cost = torch.mean(C(s, d))
+    if batch_idx % 20 == 0:
+        print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+            epoch, batch_idx * len(data), len(train_loader.dataset),
+            100. * batch_idx / len(train_loader), cost.item()))
+
+    costs.append(cost)
+    
+print('Validation:  Training error %0.1f%% / Test error %0.1f%%' % (
+        validate(train_dataset, num_samples_to_test = 10000),
+        validate(test_dataset, num_samples_to_test = 10000),))
