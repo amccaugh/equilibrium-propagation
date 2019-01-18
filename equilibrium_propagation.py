@@ -26,7 +26,7 @@ dtype = torch.float
 # Helpful short and to-the-point torch tutorial: https://jhui.github.io/2018/02/09/PyTorch-Basic-operations/
 torch.manual_seed(seed = 0)
 
-layer_sizes = [3, 20, 20, 4]
+layer_sizes = [3, 100, 100, 4]
 layer_indices = np.cumsum([0] + layer_sizes)
 num_neurons = sum(layer_sizes)
 
@@ -221,7 +221,7 @@ def generate_targets(s, T):
 
 seed = 2
 eps = 0.01
-batch_size = 1
+batch_size = 20
 beta = 0.1
 total_tau = 10
 learning_rate = 1e-2
@@ -244,7 +244,7 @@ for n in range(100):
     s_clamped_phase = s.clone()
 #    plot_states_and_energy(states, energies)
     
-    W = update_weights(W, beta, s_free_phase, s_clamped_phase, learning_rate = 1e-3)
+    W = update_weights(W, beta, s_free_phase, s_clamped_phase, learning_rate = learning_rate)
     costs.append(torch.mean(C(s, d)).item())
 
 plot(costs)
