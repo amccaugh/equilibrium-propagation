@@ -1,6 +1,6 @@
 import numpy as np
 from matplotlib import pyplot as plt
-from numba import jit
+#from numba import jit
 
 # TODO / things to try:
 # - Divide weight matrix by 10
@@ -12,7 +12,7 @@ from numba import jit
 np.random.seed(seed = 0)
 
 
-layer_sizes = [3, 20, 20, 4]
+layer_sizes = [3, 100, 100, 4]
 layer_indices = np.cumsum([0] + layer_sizes)
 num_neurons = sum(layer_sizes)
 
@@ -176,7 +176,7 @@ seed = 1
 eps = 0.01
 batch_size = 20
 beta = 0.1
-total_tau = 3
+total_tau = 10
 learning_rate = 1e-3
 W, W_mask = intialize_weight_matrix(layer_sizes, seed = seed)
 T = target_matrix(seed = seed)
@@ -185,7 +185,7 @@ s = random_initial_state(batch_size = batch_size, seed = seed)
 states = []
 energies = []
 costs = []
-for n in range(1000):
+for n in range(100):
     s = random_initial_state(batch_size = batch_size, seed = None)
     x = s[:,ix]
     y = s[:,iy]
@@ -200,10 +200,10 @@ for n in range(1000):
     s_clamped_phase = s.copy()
 #    plot_states_and_energy(states, energies)
     
-    W = update_weights(W, beta, s_free_phase, s_clamped_phase, learning_rate = 1e-3)
+    W = update_weights(W, beta, s_free_phase, s_clamped_phase, learning_rate = learning_rate)
     costs.append(np.mean(C(s[:,iy], d)))
 #    dW = weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase)
 #    W += np.mean(dW, axis = 0)
 
-plot(costs)
+#plot(costs)
 
