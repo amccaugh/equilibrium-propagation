@@ -94,14 +94,12 @@ def E(s, W):
     
 def C(s, d):
     y = s*my
-    temp = y-d
-    if y is None or d is None:
-        import pdb
-        pdb.set_trace()
-    return 0.5*torch.norm(temp, dim = 1)**2
+    return 0.5*torch.norm(y-d, dim = 1)**2
 
 
 def F(s, W, beta, d):
+    if beta == 0:
+        return E(s,W)
     return E(s, W) + beta*C(s, d = d) # + term3
 #
 #def step(s, W, eps, beta, d):
@@ -128,7 +126,7 @@ def F(s, W, beta, d):
 
 def step(s, W, eps, beta, d):
     Fsum = torch.sum(F(s, W, beta, d))
-    Fsum.backward(retain_graph = True)
+    Fsum.backward()
     dsdt = s.grad*mhy
     s_new = torch.clamp(s-eps*dsdt, 0, 1)
     s_new.detach_().requires_grad_() # Otherwise backprop follows computation back all the way to the first state
