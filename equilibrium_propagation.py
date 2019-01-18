@@ -247,7 +247,7 @@ for n in range(100):
     W = update_weights(W, beta, s_free_phase, s_clamped_phase, learning_rate = learning_rate)
     costs.append(torch.mean(C(s, d)).item())
 
-plot(costs)
+#plot(costs)
 
 #%% Plot energies
 #seed = 1
