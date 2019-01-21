@@ -349,22 +349,24 @@ test_dataset = datasets.MNIST(data_path, train=True, download=True,
                        transforms.ToTensor(),
 #                       transforms.Normalize((0.5,), (0.3081,))
                    ]))
-train_loader = torch.utils.data.DataLoader(dataset = dataset, batch_size=batch_size, shuffle=True)
+train_loader = torch.utils.data.DataLoader(dataset = train_dataset, batch_size=batch_size, shuffle=True)
 
 # Run training loop
 costs = []
-for batch_idx, (data, target) in enumerate(train_loader):
-    epoch = 1
-    s,d = convert_dataset_batch(data,target, batch_size)
-    s,W = train_batch(s, W, d, beta, eps, total_tau, learning_rate)
-    cost = torch.mean(C(s, d))
-    if batch_idx % 20 == 0:
-        print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-            epoch, batch_idx * len(data), len(train_loader.dataset),
-            100. * batch_idx / len(train_loader), cost.item()))
-
-    costs.append(cost)
-    
-print('Validation:  Training error %0.1f%% / Test error %0.1f%%' % (
-        validate(train_dataset, num_samples_to_test = 10000),
-        validate(test_dataset, num_samples_to_test = 10000),))
+error = []
+for epoch in tqdm(range(20)):
+    for batch_idx, (data, target) in enumerate(train_loader):
+#        epoch = 1
+        s,d = convert_dataset_batch(data,target, batch_size)
+        s,W = train_batch(s, W, d, beta, eps, total_tau, learning_rate)
+#        cost = torch.mean(C(s, d))
+        if batch_idx % 20 == 0:
+            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+                epoch, batch_idx * len(data), len(train_loader.dataset),
+                100. * batch_idx / len(train_loader), cost.item()))
+        if batch_idx % 500 == 0:
+            train_error = validate(train_dataset, num_samples_to_test = 10000)
+            test_error = validate(test_dataset, num_samples_to_test = 10000)
+            print('Validation:  Training error %0.1f%% / Test error %0.1f%%' % (train_error, test_error))
+            error.append([batch_idx, train_error, test_error])
+#        costs.append(cost)
