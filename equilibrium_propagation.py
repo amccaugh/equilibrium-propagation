@@ -6,6 +6,7 @@
 
 import numpy as np
 from matplotlib import pyplot as plt
+
 import torch
 from torchvision import datasets, transforms
 import os
@@ -15,6 +16,7 @@ from tqdm import tqdm
 device = torch.device('cuda'); torch.set_default_tensor_type(torch.cuda.FloatTensor)
 torch.set_default_dtype(torch.float)
 dtype = torch.float
+
 
 # TODO / things to try:
 # Divide weight matrix by 10
@@ -312,6 +314,7 @@ T = target_matrix(seed = seed)
 states = []
 energies = []
 costs = []
+
 s = random_initial_state(batch_size = batch_size)
 #    x = s[:,ix]
 #    y = s[:,iy]
@@ -328,6 +331,7 @@ plot_states_and_energy(states, energies)
 
 W = update_weights(W, beta, s_free_phase, s_clamped_phase, learning_rate = 1e-3)
 costs.append(torch.mean(C(s, d)).item())
+
     
 #%% Thing
 
