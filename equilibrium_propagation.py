@@ -3,7 +3,7 @@ from matplotlib import pyplot as plt
 import torch
 from torchvision import datasets, transforms
 import os
-import tqdm
+from tqdm import tqdm
 
 #device = torch.device('cpu'); torch.set_default_tensor_type(torch.FloatTensor)
 device = torch.device('cuda'); torch.set_default_tensor_type(torch.cuda.FloatTensor)
@@ -68,11 +68,9 @@ def initialize_weight_matrix(layer_sizes, seed = None, kind = 'layered', symmetr
             W[i:i+di, j:j+dj] = wll
             W[j:j+dj, i:i+di] = wll2
             W_mask[i:i+di, j:j+dj] = wll*0 + 1
-#            W_mask[j:j+dj, i:i+di] = wll2*0 + 1
+            W_mask[j:j+dj, i:i+di] = wll2*0 + 1
         if symmetric == True:
-            W[W_mask.T] *= 0
-            W += W.T # Make weights symmetric
-        W_mask += W_mask.T
+            W = np.tril(W) + np.tril(W, k = -1).T
     elif kind == 'fc':
         # Create a fully-connected weight matrix
         W = np.random.randn(num_neurons,num_neurons) # The weight matrix for one layer to the next
@@ -308,7 +306,7 @@ beta = 0.1
 total_tau = 10
 learning_rate = 0.01
 num_epochs = 1
-W, W_mask = initialize_weight_matrix(layer_sizes, seed = seed)
+W, W_mask = initialize_weight_matrix(layer_sizes, seed = seed, kind = 'layered', symmetric = False)
 #T = target_matrix(seed = seed)
 
 # Setup MNIST data loader
@@ -318,7 +316,7 @@ train_dataset = datasets.MNIST(data_path, train=True, download=True,
                        transforms.ToTensor(),
 #                       transforms.Normalize((0.5,), (0.3081,))
                    ]))
-test_dataset = datasets.MNIST(data_path, train=True, download=True,
+test_dataset = datasets.MNIST(data_path, train=False, download=True,
                    transform=transforms.Compose([
                        transforms.ToTensor(),
 #                       transforms.Normalize((0.5,), (0.3081,))
@@ -329,12 +327,12 @@ train_loader = torch.utils.data.DataLoader(dataset = train_dataset, batch_size=b
 costs = []
 error = []
 for epoch in tqdm(range(num_epochs)):
-    for batch_idx, (data, target) in tqdm(enumerate(train_loader)):
+    for batch_idx, (data, target) in enumerate(train_loader):
 #        epoch = 1
         s,d = convert_dataset_batch(data,target, batch_size)
         s,W = train_batch(s, W, d, beta, eps, total_tau, learning_rate)
-#        cost = torch.mean(C(s, d))
         if batch_idx % 20 == 0:
+            cost = torch.mean(C(s, d))
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
                 epoch, batch_idx * len(data), len(train_loader.dataset),
                 100. * batch_idx / len(train_loader), cost.item()))
