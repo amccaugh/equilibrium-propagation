@@ -3,6 +3,7 @@ from matplotlib import pyplot as plt
 import torch
 from torchvision import datasets, transforms
 import os
+import tqdm
 
 #device = torch.device('cpu'); torch.set_default_tensor_type(torch.FloatTensor)
 device = torch.device('cuda'); torch.set_default_tensor_type(torch.cuda.FloatTensor)
@@ -243,7 +244,7 @@ def validate(dataset, num_samples_to_test = 1000):
 #beta = 0.1
 #total_tau = 10
 #learning_rate = 1e-2
-#W, W_mask = initialize_weight_matrix(layer_sizes, seed = seed)
+#W, W_mask = initialize_weight_matrix(layer_sizes, seed = seed, kind = 'layered', symmetric = True)
 #T = target_matrix(seed = seed)
 #
 #states = []
@@ -274,7 +275,7 @@ def validate(dataset, num_samples_to_test = 1000):
 #beta = 0.1
 #total_tau = 10
 #learning_rate = 1e-3
-#W, W_mask = initialize_weight_matrix(layer_sizes, seed = seed)
+#W, W_mask = initialize_weight_matrix(layer_sizes, seed = seed, kind = 'layered', symmetric = True)
 #T = target_matrix(seed = seed)
 #
 #states = []
@@ -306,6 +307,7 @@ batch_size = 20
 beta = 0.1
 total_tau = 10
 learning_rate = 0.01
+num_epochs = 1
 W, W_mask = initialize_weight_matrix(layer_sizes, seed = seed)
 #T = target_matrix(seed = seed)
 
@@ -326,8 +328,8 @@ train_loader = torch.utils.data.DataLoader(dataset = train_dataset, batch_size=b
 # Run training loop
 costs = []
 error = []
-for epoch in tqdm(range(20)):
-    for batch_idx, (data, target) in enumerate(train_loader):
+for epoch in tqdm(range(num_epochs)):
+    for batch_idx, (data, target) in tqdm(enumerate(train_loader)):
 #        epoch = 1
         s,d = convert_dataset_batch(data,target, batch_size)
         s,W = train_batch(s, W, d, beta, eps, total_tau, learning_rate)
