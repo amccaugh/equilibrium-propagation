@@ -28,7 +28,7 @@ dtype = torch.float
 # Helpful short and to-the-point torch tutorial: https://jhui.github.io/2018/02/09/PyTorch-Basic-operations/
 torch.manual_seed(seed = 0)
 
-layer_sizes = [28*28, 100, 10]
+layer_sizes = [28*28, 500, 10]
 layer_indices = np.cumsum([0] + layer_sizes)
 num_neurons = sum(layer_sizes)
 
@@ -48,7 +48,7 @@ my[:,iy] = 1
 mh[:,ih] = 1
 mhy[:,ihy] = 1
 
-def intialize_weight_matrix(layer_sizes, seed = None, kind = 'layered', symmetric = True):
+def initialize_weight_matrix(layer_sizes, seed = None, kind = 'layered', symmetric = True):
     np.random.seed(seed = seed)
     W = np.zeros([num_neurons,num_neurons])
     W_mask = np.zeros(W.shape, dtype = np.int32)
@@ -174,15 +174,6 @@ def plot_states_and_energy(states, energies):
         ax[1].set_ylabel('Energy F')
         ax[1].set_xlabel('Time (t/tau)')
 
-## Weight update
-#def weight_update_old(W, W_mask, beta, s_free_phase, s_clamped_phase):
-#    # W_mask = matrix of shape(W) with 1s or zeros based on 
-#    # whether the connection / weight between i and j exists
-#    term1 = np.matmul(np.expand_dims(rho_old(s_clamped_phase),2), np.expand_dims(rho_old(s_clamped_phase),1)) # This also works instead of einsum
-#    term2 = np.matmul(np.expand_dims(rho_old(s_free_phase),2), np.expand_dims(rho_old(s_free_phase),1)) # This also works instead of einsum
-#    dW = 1/beta*(term1 - term2)
-#    dW = np.multiply(dW, W_mask)
-#    return dW
 
 # Weight update
 def weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase):
@@ -199,25 +190,6 @@ def update_weights(W, beta, s_free_phase, s_clamped_phase, learning_rate = 1):
     dW = weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase)
     W += torch.mean(dW, dim = 0)*learning_rate
     return W
-
-
-#def target_matrix(seed = None):
-#    """ Generates a target of the form y = Tx
-#    """
-#    torch.manual_seed(seed = seed)
-#    T = torch.rand((1, layer_sizes[-1], layer_sizes[0]), dtype = dtype)/5
-#    return T
-    
-    
-#def generate_targets(s, T):
-#    """ Creates `d`, the target to which `y` will be weakly-clamped
-#    """
-##    d = np.matmul(T,s[:,iy])
-#    x = s[:,ix].unsqueeze(2)
-#    d_values = torch.matmul(T,x).squeeze()
-#    d = torch.zeros(s.shape)
-#    d[:,iy] = d_values
-#    return d
 
 
 def train_batch(s,W,d, beta, eps, total_tau, learning_rate):
@@ -263,23 +235,6 @@ def validate(dataset, num_samples_to_test = 1000):
             break
     return (1-num_correct.item()/num_samples_evaluated)*100
 
-
-#W, W_mask = intialize_weight_matrix(layer_sizes, seed = 0)
-#W_old = W.squeeze().numpy()
-#W_mask_old = W_mask.squeeze().numpy()
-#
-#s = random_initial_state(batch_size = batch_size, seed = 0)
-#s_free_phase_old = s.numpy().copy()
-#s_free_phase = s.clone()
-#
-#s = random_initial_state(batch_size = batch_size, seed = 1)
-#s_clamped_phase_old = s.numpy().copy()
-#s_clamped_phase = s.clone()
-#
-#dW_old = weight_update_old(W_old, W_mask_old, 0.7, s_free_phase_old, s_clamped_phase_old)
-#dW = weight_update(W, W_mask, 0.7, s_free_phase, s_clamped_phase)
-#print(np.allclose(dW.numpy(), dW_old))
-
 #%% Run algorithm
 
 #seed = 2
@@ -288,7 +243,7 @@ def validate(dataset, num_samples_to_test = 1000):
 #beta = 0.1
 #total_tau = 10
 #learning_rate = 1e-2
-#W, W_mask = intialize_weight_matrix(layer_sizes, seed = seed)
+#W, W_mask = initialize_weight_matrix(layer_sizes, seed = seed)
 #T = target_matrix(seed = seed)
 #
 #states = []
@@ -319,7 +274,7 @@ def validate(dataset, num_samples_to_test = 1000):
 #beta = 0.1
 #total_tau = 10
 #learning_rate = 1e-3
-#W, W_mask = intialize_weight_matrix(layer_sizes, seed = seed)
+#W, W_mask = initialize_weight_matrix(layer_sizes, seed = seed)
 #T = target_matrix(seed = seed)
 #
 #states = []
@@ -351,7 +306,7 @@ batch_size = 20
 beta = 0.1
 total_tau = 10
 learning_rate = 0.01
-W, W_mask = intialize_weight_matrix(layer_sizes, seed = seed)
+W, W_mask = initialize_weight_matrix(layer_sizes, seed = seed)
 #T = target_matrix(seed = seed)
 
 # Setup MNIST data loader
