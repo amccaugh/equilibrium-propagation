@@ -48,29 +48,46 @@ my[:,iy] = 1
 mh[:,ih] = 1
 mhy[:,ihy] = 1
 
-def intialize_weight_matrix(layer_sizes, seed = None):
-    np.random.seed(seed = 0)
+def intialize_weight_matrix(layer_sizes, seed = None, kind = 'layered', symmetric = True):
+    np.random.seed(seed = seed)
     W = np.zeros([num_neurons,num_neurons])
-    W_mask = np.zeros(W.shape)
-    # Initialize weights matrix
-    for n in range(len(layer_sizes)-1): # Make weights only exist from one layer to the next
-        wll = np.random.randn(layer_sizes[n+1],layer_sizes[n]) # The weight matrix for one layer to the next
-        wll *= np.sqrt(2/(layer_sizes[n]))     # Glorot-Bengio (Xavier) weight normalization
-    #    wll *= 0.2
-        i = layer_indices[n+1]
-        j = layer_indices[n]
-        di = wll.shape[0]
-        dj = wll.shape[1]
-        W[i:i+di, j:j+dj] = wll
-        W_mask[i:i+di, j:j+dj] = wll*0 + 1
-    W += W.T # Make weights symmetric
-    W_mask += W_mask.T
+    W_mask = np.zeros(W.shape, dtype = np.int32)
+    if kind == 'layered':
+        # Initialize weights matrix, connecting one layer to the next
+        for n in range(len(layer_sizes)-1): # Make weights only exist from one layer to the next
+            wll = np.random.randn(layer_sizes[n+1],layer_sizes[n]) # The weight matrix for one layer to the next
+            wll2 = np.random.randn(layer_sizes[n],layer_sizes[n+1]) # The weight matrix for the reverse
+            wll *= np.sqrt(2/(layer_sizes[n]))     # Glorot-Bengio (Xavier) weight normalization
+            wll2 *= np.sqrt(2/(layer_sizes[n]))     # Glorot-Bengio (Xavier) weight normalization
+        #    wll *= 0.2; wll2 *= 0.2
+            i = layer_indices[n+1]
+            j = layer_indices[n]
+            di = wll.shape[0]
+            dj = wll.shape[1]
+            W[i:i+di, j:j+dj] = wll
+            W[j:j+dj, i:i+di] = wll2
+            W_mask[i:i+di, j:j+dj] = wll*0 + 1
+#            W_mask[j:j+dj, i:i+di] = wll2*0 + 1
+        if symmetric == True:
+            W[W_mask.T] *= 0
+            W += W.T # Make weights symmetric
+        W_mask += W_mask.T
+    elif kind == 'fc':
+        # Create a fully-connected weight matrix
+        W = np.random.randn(num_neurons,num_neurons) # The weight matrix for one layer to the next
+        W_mask += 1
+        if symmetric == True:
+            W = np.tril(W) + np.tril(W, k = -1).T
+    elif kind == 'smallworld':
+        pass
+            
     W = torch.from_numpy(W).float().to(device) # Convert to float Tensor
     W_mask = torch.from_numpy(W_mask).float().to(device) # .byte() is the closest thing to a boolean tensor pytorch has
      # Line up dimensions so that the zeroth dimension is the batch #
     W = W.unsqueeze(0)
     W_mask = W_mask.unsqueeze(0)
     return W, W_mask
+
 
 def random_initial_state(batch_size = 7):
     s = torch.rand(batch_size, num_neurons)
