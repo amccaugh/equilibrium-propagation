@@ -1,3 +1,9 @@
+# TO FIX: In non-layered connections, the neurons are likely saturating due to
+# large amounts of integrated input from all the other neurons; check energy
+# diagrams
+
+# TODO: Convert to class so mhy, mx, etc are available as local variables
+
 import numpy as np
 from matplotlib import pyplot as plt
 import torch
@@ -11,9 +17,7 @@ torch.set_default_dtype(torch.float)
 dtype = torch.float
 
 # TODO / things to try:
-# - Divide weight matrix by 10
-# - Disable state clipping / allow neuron states to be negative (Bengio STDP-compatible allows it!)
-# - Try small-world style W_mask (~N/2^k W_mask per layer to layers k distance away)
+# Divide weight matrix by 10
 # Implement randomize_beta (beta gets chosen from randn(1) and see if it helps
 
 #%% Check pytorch can use GPU - https://stackoverflow.com/questions/48152674/how-to-check-if-pytorch-is-using-the-gpu
@@ -29,7 +33,7 @@ dtype = torch.float
 # Helpful short and to-the-point torch tutorial: https://jhui.github.io/2018/02/09/PyTorch-Basic-operations/
 torch.manual_seed(seed = 0)
 
-layer_sizes = [28*28, 500, 10]
+layer_sizes = [4, 5, 10]
 layer_indices = np.cumsum([0] + layer_sizes)
 num_neurons = sum(layer_sizes)
 
@@ -49,7 +53,9 @@ my[:,iy] = 1
 mh[:,ih] = 1
 mhy[:,ihy] = 1
 
-def initialize_weight_matrix(layer_sizes, seed = None, kind = 'layered', symmetric = True):
+def initialize_weight_matrix(layer_sizes, seed = None, kind = 'layered', symmetric = True,
+                             density = 0.5, # Value from 0 to 1, used for 'smallworld' and 'sparse' connectivity
+                             ):
     np.random.seed(seed = seed)
     W = np.zeros([num_neurons,num_neurons])
     W_mask = np.zeros(W.shape, dtype = np.int32)
@@ -69,17 +75,22 @@ def initialize_weight_matrix(layer_sizes, seed = None, kind = 'layered', symmetr
             W[j:j+dj, i:i+di] = wll2
             W_mask[i:i+di, j:j+dj] = wll*0 + 1
             W_mask[j:j+dj, i:i+di] = wll2*0 + 1
-        if symmetric == True:
-            W = np.tril(W) + np.tril(W, k = -1).T
     elif kind == 'fc':
         # Create a fully-connected weight matrix
         W = np.random.randn(num_neurons,num_neurons) # The weight matrix for one layer to the next
+        W *= np.sqrt(1/(num_neurons))
         W_mask += 1
-        if symmetric == True:
-            W = np.tril(W) + np.tril(W, k = -1).T
     elif kind == 'smallworld':
+        # Create a small-world-connectivity matrix
         pass
-            
+    elif kind == 'sparse':
+        # Creates random connections.  If symmetric=False, most connections will
+        # be simplex, not duplex.  Uses density parameter
+        W_mask = np.random.binomial(n = 1, p = density, size = W.shape)
+        W = np.random.randn(num_neurons,num_neurons)*W_mask # The weight matrix for one layer to the next
+    
+    if symmetric == True:
+        W = np.tril(W) + np.tril(W, k = -1).T        
     W = torch.from_numpy(W).float().to(device) # Convert to float Tensor
     W_mask = torch.from_numpy(W_mask).float().to(device) # .byte() is the closest thing to a boolean tensor pytorch has
      # Line up dimensions so that the zeroth dimension is the batch #
@@ -150,8 +161,8 @@ def evolve_to_equilbrium(s, W, d, beta, eps, total_tau,
     num_steps = int(total_tau/eps)
     for n in range(num_steps):
         step(s, W, eps = eps, beta = beta, d = d)
-        if state_list is not None: states.append(s.numpy().copy())
-        if energy_list is not None: energies.append(F(s, W, beta, d).numpy().copy())
+        if state_list is not None: states.append(s.cpu().numpy().copy())
+        if energy_list is not None: energies.append(F(s, W, beta, d).cpu().numpy().copy())
     return s
 
     
@@ -234,6 +245,26 @@ def validate(dataset, num_samples_to_test = 1000):
             break
     return (1-num_correct.item()/num_samples_evaluated)*100
 
+# Older linear-fit model
+    
+def target_matrix(seed = None):
+    """ Generates a target of the form y = Tx
+    """
+    torch.manual_seed(seed = seed)
+    T = torch.rand((1, layer_sizes[-1], layer_sizes[0]), dtype = dtype)/5
+    return T
+    
+    
+def generate_targets(s, T):
+    """ Creates `d`, the target to which `y` will be weakly-clamped
+    """
+#    d = np.matmul(T,s[:,iy])
+    x = s[:,ix].unsqueeze(2)
+    d_values = torch.matmul(T,x).squeeze()
+    d = torch.zeros(s.shape)
+    d[:,iy] = d_values
+    return d
+
 #%% Run algorithm
 
 #seed = 2
@@ -267,34 +298,36 @@ def validate(dataset, num_samples_to_test = 1000):
 #plot(costs)
 
 #%% Plot energies
-#seed = 1
-#eps = 0.01
-#batch_size = 1
-#beta = 0.1
-#total_tau = 10
-#learning_rate = 1e-3
-#W, W_mask = initialize_weight_matrix(layer_sizes, seed = seed, kind = 'layered', symmetric = True)
-#T = target_matrix(seed = seed)
-#
-#states = []
-#energies = []
-#costs = []
-#s = random_initial_state(batch_size = batch_size)
-##    x = s[:,ix]
-##    y = s[:,iy]
-#d = generate_targets(s, T)
-#
-#s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = total_tau,
-#                     state_list = states, energy_list = energies)
-#s_free_phase = s.clone()
-#
-#s = evolve_to_equilbrium(s = s, W = W, d = d, beta = 1, eps = eps, total_tau = total_tau,
-#                     state_list = states, energy_list = energies)
-#s_clamped_phase = s.clone()
-#plot_states_and_energy(states, energies)
-#
-#W = update_weights(W, beta, s_free_phase, s_clamped_phase, learning_rate = 1e-3)
-#costs.append(torch.mean(C(s, d)).item())
+    
+seed = 1
+eps = 0.01
+batch_size = 1
+beta = 0.1
+total_tau = 10
+learning_rate = 1e-3
+W, W_mask = initialize_weight_matrix(layer_sizes, seed = seed,
+                                     kind = 'fc', symmetric = True, density = 0.75)
+T = target_matrix(seed = seed)
+
+states = []
+energies = []
+costs = []
+s = random_initial_state(batch_size = batch_size)
+#    x = s[:,ix]
+#    y = s[:,iy]
+d = generate_targets(s, T)
+
+s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = total_tau,
+                     state_list = states, energy_list = energies)
+s_free_phase = s.clone()
+
+s = evolve_to_equilbrium(s = s, W = W, d = d, beta = 1, eps = eps, total_tau = total_tau,
+                     state_list = states, energy_list = energies)
+s_clamped_phase = s.clone()
+plot_states_and_energy(states, energies)
+
+W = update_weights(W, beta, s_free_phase, s_clamped_phase, learning_rate = 1e-3)
+costs.append(torch.mean(C(s, d)).item())
     
 #%% Thing
 
@@ -306,7 +339,8 @@ beta = 0.1
 total_tau = 10
 learning_rate = 0.01
 num_epochs = 1
-W, W_mask = initialize_weight_matrix(layer_sizes, seed = seed, kind = 'layered', symmetric = False)
+W, W_mask = initialize_weight_matrix(layer_sizes, seed = seed,
+                                     kind = 'fc', symmetric = True, density = 0.75)
 #T = target_matrix(seed = seed)
 
 # Setup MNIST data loader
@@ -342,3 +376,24 @@ for epoch in tqdm(range(num_epochs)):
             print('Validation:  Training error %0.1f%% / Test error %0.1f%%' % (train_error, test_error))
             error.append([batch_idx, train_error, test_error])
 #        costs.append(cost)
+
+#%%
+
+# See how symmetric the weights are
+X = W.squeeze().cpu().numpy().copy()
+M = np.array(W_mask.cpu().numpy().copy(), dtype = np.bool)
+Y = X - X.T
+Z = X / X.T
+np.std(X.flatten()[M.flatten()])
+np.std(Y.flatten()[M.flatten()])
+np.mean(Z.flatten()[M.flatten()])
+np.median(Z.flatten()[M.flatten()])
+Z.flatten()[M.flatten()]
+plt.hist(Z.flatten()[M.flatten()])
+max(Z.flatten()[M.flatten()])
+np.max(X)
+plt.hist(np.clip(Z.flatten()[M.flatten()],-5,5))
+plt.hist(np.clip(Z.flatten()[M.flatten()],-5,5), bins = 100)
+
+
+plt.hist(X.flatten()[M.flatten()], bins = 100)
