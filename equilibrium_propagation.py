@@ -222,6 +222,7 @@ class EP(object):
         # Update weights
         dW = self._calculate_weight_update(beta, s_free_phase, s_clamped_phase)
         self.W += torch.mean(dW, dim = 0)*learning_rate
+        return s,W
 
 
     def convert_dataset_batch(self, data, target):
@@ -233,13 +234,14 @@ class EP(object):
             d_target[n, target[n]] = 1 # Convert to one-hot
         
         # Setup intitial state s and target d
-        self.s = self.randomize_initial_state()
+        s = self.randomize_initial_state()
         s[:,self.ix] = data
         d = torch.zeros(s.shape)
         d[:,self.iy] = d_target
+        self.s = s
         return s,d
 
-
+    # FIXME
     def validate(self, dataset, num_samples_to_test = 1000):
         """ Returns the % error validated against the training or test dataset """
         self.batch_size = 1000
@@ -247,7 +249,7 @@ class EP(object):
         num_samples_evaluated = 0
         num_correct = 0
         for batch_idx, (data, target) in enumerate(train_loader):
-            s,d = self.convert_dataset_batch(data,target, self.batch_size)
+            s,d = self.convert_dataset_batch(data,target)
             s = self.evolve_to_equilbrium(s = s, W = W, d = None, beta = 0)
             compared = s[:,self.iy].argmax(dim = 1) == d[:,self.iy].argmax(dim = 1)
             num_samples_evaluated += self.batch_size
@@ -360,7 +362,7 @@ num_epochs = 1
 layer_sizes = [28*28, 500, 10]
 
 ep = EP(eps=0.5, total_tau=10, batch_size=20, seed=None)
-W, W_mask = ep.initialize_weight_matrix(layer_sizes, seed = seed, kind = 'fc',
+W, W_mask = ep.initialize_weight_matrix(layer_sizes, seed = seed, kind = 'layered',
                             symmetric = True, density = 0.75)
 #T = target_matrix(seed = seed)
 
@@ -376,7 +378,7 @@ test_dataset = datasets.MNIST(data_path, train=False, download=True,
                        transforms.ToTensor(),
 #                       transforms.Normalize((0.5,), (0.3081,))
                    ]))
-train_loader = torch.utils.data.DataLoader(dataset = train_dataset, shuffle=True)
+train_loader = torch.utils.data.DataLoader(dataset = train_dataset, batch_size=batch_size, shuffle=True)
 
 #        s,d = ep.convert_dataset_batch(data,target, batch_size)
         
@@ -388,15 +390,15 @@ for epoch in tqdm(range(num_epochs)):
         pass
 #        epoch = 1
         s,d = ep.convert_dataset_batch(data,target)
-        s,W = ep.train_batch(s, W, d, beta, eps, total_tau, learning_rate)
+        s,W = ep.train_batch(d, beta, learning_rate)
         if batch_idx % 20 == 0:
-            cost = torch.mean(C(s, d))
+            cost = torch.mean(ep.C(s, d))
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
                 epoch, batch_idx * len(data), len(train_loader.dataset),
                 100. * batch_idx / len(train_loader), cost.item()))
         if batch_idx % 500 == 0:
-            train_error = validate(train_dataset, num_samples_to_test = 10000)
-            test_error = validate(test_dataset, num_samples_to_test = 10000)
+            train_error = ep.validate(train_dataset, num_samples_to_test = 10000)
+            test_error = ep.validate(test_dataset, num_samples_to_test = 10000)
             print('Validation:  Training error %0.1f%% / Test error %0.1f%%' % (train_error, test_error))
             error.append([batch_idx, train_error, test_error])
 #        costs.append(cost)
