@@ -35,7 +35,16 @@ dtype = torch.float
 # Helpful short and to-the-point torch tutorial: https://jhui.github.io/2018/02/09/PyTorch-Basic-operations/
 
 
-class EP(object):
+def rho(s):
+    return torch.clamp(s,0,1)
+
+def rhoprime(s):
+    rp = torch.zeros(s.shape)
+    rp[(0<=s) & (s<=1)] = 1 # SUPER IMPORTANT! if (0<s) & (s<1) zeros + ones cannot escape
+    return rp
+
+
+class EP_Network(object):
     
     def __init__(self, eps = 0.5, total_tau = 10, batch_size = 20, seed = None):
         if seed is not None:
@@ -110,91 +119,95 @@ class EP(object):
         return self.W, self.W_mask
 
 
-    def randomize_initial_state(self):
-        self.s = torch.rand(self.batch_size, self.num_neurons)
+    def randomize_initial_state(self, batch_size):
+        self.s = torch.rand(batch_size, self.num_neurons)
         return self.s
 
+    def set_x_state(self, x):
+                # # Setup intitial state s and target d
+        # # s = self.randomize_initial_state()
+        self.s[:,self.ix] = x
+        # d = torch.zeros(s.shape)
+        # d[:,self.iy] = d_target
+        # self.s = s
+        # return s,d
 
-    def rho(self, s):
-        return torch.clamp(s,0,1)
+    def set_y_state(self, y):
+        self.s[:,self.iy] = y
 
-    # def rho_old(s):
-    #     return np.clip(self.s,0,1)
-
-    def rhoprime(self, s):
-        rp = torch.zeros(s.shape)
-        rp[(0<=s) & (s<=1)] = 1 # SUPER IMPORTANT! if (0<s) & (s<1) zeros + ones cannot escape
-        return rp
-
-    def E(self, s, W):
-        term1 = 0.5*torch.sum(s*s, dim = 1)
-        rho_s = self.rho(s)
+    def E(self):
+        term1 = 0.5*torch.sum(self.s*self.s, dim = 1)
+        rho_s = rho(self.s)
         term2 = torch.matmul(rho_s.unsqueeze(2), rho_s.unsqueeze(1))
-        term2 *= W
+        term2 *= self.W
         term2 = -0.5 * torch.sum(term2, dim = [1,2])
     #    term3 = -np.sum([b[i]*rho(s[i]) for i in range(len(b))])
         return term1 + term2 # + term3
         
-    def C(self, s, d):
-        y = s*self.my
-        return 0.5*torch.norm(y-d, dim = 1)**2
+    def C(self, y_target):
+        # y = self.s*self.my
+        y = self.s[:,self.iy]
+        return 0.5*torch.norm(y-y_target, dim = 1)**2
 
 
-    def F(self, s, W, beta, d):
+    def F(self, beta, y_target):
         if beta == 0:
-            return self.E(s, W)
-        return self.E(s = s, W = W) + beta*self.C(s=s, d = d) # + term3
+            return self.E()
+        return self.E() + beta*self.C(y_target = y_target) # + term3
 
-    def step(self, beta, d):
+
+    def step(self, beta, y_target):
         # s - shape (batch_size, self.num_neurons)
         # W - shape (self.num_neurons, self.num_neurons)
         # beta - constant
         # d - shape (batch_size, self.num_neurons)
     #    %%timeit
     #    Rs = (W @ rho(s).unsqueeze(2)).squeeze() # Slow, correct
-        s = self.s
-        W = self.W
-        Rs = (self.rho(s) @ W).squeeze() # Fast, but reliant on W being symmetric
+        # s = self.s
+        # W = self.W
+        Rs = (rho(self.s) @ W).squeeze() # Fast, but reliant on W being symmetric
         # Rs - shape (batch_size, self.num_neurons)
-        dEds = self.eps*(Rs - s) # dE/ds term, multiplied by dt (epsilon)
+        dEds = self.eps*(Rs - self.s) # dE/ds term, multiplied by dt (epsilon)
         dEds *= self.mhy # Mask dEds so it only adds to h and y units
-        s += dEds
+        self.s += dEds
         if beta != 0:
-            dCds = self.eps*beta*(d - s) # beta*dC/ds weak-clamping term, mul tiplied by dt (epsilon)
-            dCds *= self.my # Mask dCds so it only adds to y (output) units
-            s += dCds
+            # dCds = self.eps*beta*(d - self.s) # beta*dC/ds weak-clamping term, mul tiplied by dt (epsilon)
+            # dCds *= self.my # Mask dCds so it only adds to y (output) units
+            # self.s += dCds
+            dCds = self.eps*beta*(y_target - self.s[:,self.iy])
+            self.s[:,self.iy] += dCds
         # Clipping prevents states from becoming negative due to bad (Euler) time integration
         # Also, clipping = equivalent to multiplying R(s) by rhoprime(s) when beta = 0
-        torch.clamp(s, 0, 1, out = self.s)
+        torch.clamp(self.s, 0, 1, out = self.s)
         return self.s
 
 
-    def evolve_to_equilbrium(self, d, beta,
+    def evolve_to_equilbrium(self, y_target, beta,
                              state_list = None, energy_list = None):
         # If state_recorder is passed an (empty) list, it will append each state to it
         num_steps = int(self.total_tau/self.eps)
         for n in range(num_steps):
-            self.step(beta = beta, d = d)
-            if state_list is not None: states.append(s.cpu().numpy().copy())
-            if energy_list is not None: energies.append(self.F(self.s, self.W, beta, d).cpu().numpy().copy())
-        return s
+            self.step(beta = beta, y_target = y_target)
+            if state_list is not None: state_list.append(self.s.cpu().numpy().copy())
+            if energy_list is not None: energy_list.append(self.F(beta, y_target).cpu().numpy().copy())
+        return self.s
 
         
-    def plot_states_and_energy(self, states, energies):
-        states_batch = states
-        energies_batch = energies
-        for n in range(np.array(states_batch).shape[1]):
-            states = np.array(states_batch)[:,n,:]
-            energies = np.array(energies_batch)[:,n]
-            # Plot states
-            t = np.linspace(0,len(states) * eps, len(states))
+    def plot_states_and_energy(self, state_list, energy_list):
+        state_list_batch = state_list
+        energy_list_batch = energy_list
+        for n in range(np.array(state_list_batch).shape[1]):
+            state_list = np.array(state_list_batch)[:,n,:]
+            energy_list = np.array(energy_list_batch)[:,n]
+            # Plot state_list
+            t = np.linspace(0,len(state_list) * eps, len(state_list))
             fig, ax = plt.subplots(2,1, sharex = True)
-            ax[0].plot(t, np.array(states)[:,self.ih],'r')
-            ax[0].plot(t, np.array(states)[:,self.ix],'g')
-            ax[0].plot(t, np.array(states)[:,self.iy],'b')
+            ax[0].plot(t, np.array(state_list)[:,self.ih],'r')
+            ax[0].plot(t, np.array(state_list)[:,self.ix],'g')
+            ax[0].plot(t, np.array(state_list)[:,self.iy],'b')
             ax[0].set_ylabel('State values')
             
-            ax[1].plot(t, np.array(energies),'b.-')
+            ax[1].plot(t, np.array(energy_list),'b.-')
             ax[1].set_ylabel('Energy F')
             ax[1].set_xlabel('Time (t/tau)')
 
@@ -203,81 +216,104 @@ class EP(object):
     def _calculate_weight_update(self, beta, s_free_phase, s_clamped_phase):
         # W_mask = matrix of shape(W) with 1s or zeros based on 
         # whether the connection / weight between i and j exists
-        term1 = torch.unsqueeze(self.rho(s_clamped_phase),dim = 2) @ torch.unsqueeze(self.rho(s_clamped_phase),dim = 1) # This also works instead of einsum
-        term2 = torch.unsqueeze(self.rho(s_free_phase), dim = 2) @ torch.unsqueeze(self.rho(s_free_phase), dim = 1) # This also works instead of einsum
+        term1 = torch.unsqueeze(rho(s_clamped_phase),dim = 2) @ torch.unsqueeze(rho(s_clamped_phase),dim = 1) # This also works instead of einsum
+        term2 = torch.unsqueeze(rho(s_free_phase), dim = 2) @ torch.unsqueeze(rho(s_free_phase), dim = 1) # This also works instead of einsum
         dW = 1/beta*(term1 - term2)
         dW *= self.W_mask
         return dW
 
 
-    def train_batch(self, d, beta, learning_rate):
+    def train_batch(self, y_target, beta, learning_rate):
         # Perform free phase evolution
-        s = self.evolve_to_equilbrium(d = None, beta = 0)
-        s_free_phase = s.clone()
+        self.evolve_to_equilbrium(y_target = None, beta = 0)
+        s_free_phase = self.s.clone()
         
         # Perform weakly-clamped phase evolution
-        s = self.evolve_to_equilbrium(d = d, beta = 1)
-        s_clamped_phase = s.clone()
+        self.evolve_to_equilbrium(y_target = y_target, beta = 1)
+        s_clamped_phase = self.s.clone()
         
         # Update weights
         dW = self._calculate_weight_update(beta, s_free_phase, s_clamped_phase)
         self.W += torch.mean(dW, dim = 0)*learning_rate
-        return s,W
+        # return s,W
 
 
-    def convert_dataset_batch(self, data, target):
+class Target_MNIST(object):
+    def __init__(self):
+        # Setup MNIST data loader
+        data_path = os.path.realpath('./mnist_data/')
+        self.test_dataset = datasets.MNIST(data_path, train=False, download=True,
+                           transform=transforms.Compose([
+                               transforms.ToTensor(),
+        #                       transforms.Normalize((0.5,), (0.3081,))
+                           ]))
+        self.train_dataset = datasets.MNIST(data_path, train=True, download=True,
+                           transform=transforms.Compose([
+                               transforms.ToTensor(),
+        #                       transforms.Normalize((0.5,), (0.3081,))
+                           ]))
+
+    def generate_inputs_and_targets(self, batch_size, train = True):
+        """ Returns input data x of size x, and an output target state """
+        if train:
+            dataset = self.train_dataset
+        else:
+            dataset = self.test_dataset
+        loader = torch.utils.data.DataLoader(dataset = dataset, batch_size=batch_size, shuffle=True)
+        batch_idx, (data, target) = next(enumerate(loader))
+
         """ Convert the dataset "data" and "target" variables to s and d """
         data, target = data.to(device), target.to(device)
-        data = data.reshape([self.batch_size, 28*28]) # Flatten
-        d_target = torch.zeros([self.batch_size, 10])
-        for n in range(self.batch_size):
-            d_target[n, target[n]] = 1 # Convert to one-hot
+        x_data = data.reshape([batch_size, 28*28]) # Flatten
+        y_target = torch.zeros([batch_size, 10])
+        for n in range(batch_size):
+            y_target[n, target[n]] = 1 # Convert to one-hot
         
-        # Setup intitial state s and target d
-        s = self.randomize_initial_state()
-        s[:,self.ix] = data
-        d = torch.zeros(s.shape)
-        d[:,self.iy] = d_target
-        self.s = s
-        return s,d
+        return x_data, y_target
 
-    # FIXME
-    def validate(self, dataset, num_samples_to_test = 1000):
-        """ Returns the % error validated against the training or test dataset """
-        self.batch_size = 1000
-        train_loader = torch.utils.data.DataLoader(dataset = dataset, shuffle=True)
-        num_samples_evaluated = 0
-        num_correct = 0
-        for batch_idx, (data, target) in enumerate(train_loader):
-            s,d = self.convert_dataset_batch(data,target)
-            s = self.evolve_to_equilbrium(s = s, W = W, d = None, beta = 0)
-            compared = s[:,self.iy].argmax(dim = 1) == d[:,self.iy].argmax(dim = 1)
-            num_samples_evaluated += self.batch_size
-            num_correct += torch.sum(compared)
-            if num_samples_evaluated > num_samples_to_test:
-                break
-        return (1-num_correct.item()/num_samples_evaluated)*100
 
-    # Older linear-fit model
         
-    def target_matrix(self):
+# FIXME Needs to be updated to match MNIST format
+# Older linear-fit model
+class Target_LinearMatrix(object):
+    def __init__(self):
+        pass
+        # Setup MNIST data loader
+
+    def target_matrix(self, xsize, ysize):
         """ Generates a target of the form y = Tx
         """
         # torch.manual_seed(seed = seed)
-        T = torch.rand((1, self.layer_sizes[-1], self.layer_sizes[0]), dtype = dtype)/5
+        self.T = torch.rand((1, self.layer_sizes[-1], self.layer_sizes[0]), dtype = dtype)/5
         return T
         
         
-    def generate_targets(self, s, T):
+    def generate_inputs_and_targets(self, batch_size, train = True):
         """ Creates `d`, the target to which `y` will be weakly-clamped
         """
     #    d = np.matmul(T,s[:,self.iy])
-        x = s[:,self.ix].unsqueeze(2)
-        d_values = torch.matmul(T,x).squeeze()
+        x_data = torch.rand((batch_size, self.layer_sizes[-1], self.layer_sizes[0]), dtype = dtype)/5
+        y_targets = torch.matmul(self.T,x).squeeze()
         d = torch.zeros(s.shape)
         d[:,self.iy] = d_values
         return d
 
+# FIXME
+def validate(self, dataset, num_samples_to_test = 1000):
+    """ Returns the % error validated against the training or test dataset """
+    self.batch_size = 1000
+    train_loader = torch.utils.data.DataLoader(dataset = dataset, shuffle=True)
+    num_samples_evaluated = 0
+    num_correct = 0
+    for batch_idx, (data, target) in enumerate(train_loader):
+        s,d = self.convert_dataset_batch(data,target)
+        s = self.evolve_to_equilbrium(s = s, W = W, d = None, beta = 0)
+        compared = s[:,self.iy].argmax(dim = 1) == d[:,self.iy].argmax(dim = 1)
+        num_samples_evaluated += self.batch_size
+        num_correct += torch.sum(compared)
+        if num_samples_evaluated > num_samples_to_test:
+            break
+    return (1-num_correct.item()/num_samples_evaluated)*100
 #%% Run algorithm
 
 #seed = 2
@@ -353,7 +389,7 @@ class EP(object):
     
 seed = 2
 eps = 0.5
-batch_size = 20
+batch_size = 2
 beta = 0.1
 total_tau = 10
 learning_rate = 0.01
@@ -361,24 +397,39 @@ num_epochs = 1
 
 layer_sizes = [28*28, 500, 10]
 
-ep = EP(eps=0.5, total_tau=10, batch_size=20, seed=None)
-W, W_mask = ep.initialize_weight_matrix(layer_sizes, seed = seed, kind = 'layered',
+epn = EP_Network(eps=0.5, total_tau=10, batch_size=batch_size, seed=None)
+W, W_mask = epn.initialize_weight_matrix(layer_sizes, seed = seed, kind = 'layered',
                             symmetric = True, density = 0.75)
+epn.randomize_initial_state(batch_size = batch_size)
 #T = target_matrix(seed = seed)
 
+T = Target_MNIST()
+x_data, y_target = T.generate_inputs_and_targets(batch_size = batch_size)
+
+epn.step(beta = 0, y_target = None)
+epn.step(beta = 1, y_target = y_target)
+
+state_list = []
+energy_list = []
+epn.evolve_to_equilbrium(y_target, beta = 0, state_list = state_list, energy_list = energy_list)
+epn.evolve_to_equilbrium(y_target, beta = 1, state_list = state_list, energy_list = energy_list)
+epn.plot_states_and_energy(state_list, energy_list)
+
+#%%
+
 # Setup MNIST data loader
-data_path = os.path.realpath('./mnist_data/')
-train_dataset = datasets.MNIST(data_path, train=True, download=True,
-                   transform=transforms.Compose([
-                       transforms.ToTensor(),
-#                       transforms.Normalize((0.5,), (0.3081,))
-                   ]))
-test_dataset = datasets.MNIST(data_path, train=False, download=True,
-                   transform=transforms.Compose([
-                       transforms.ToTensor(),
-#                       transforms.Normalize((0.5,), (0.3081,))
-                   ]))
-train_loader = torch.utils.data.DataLoader(dataset = train_dataset, batch_size=batch_size, shuffle=True)
+#data_path = os.path.realpath('./mnist_data/')
+#train_dataset = datasets.MNIST(data_path, train=True, download=True,
+#                   transform=transforms.Compose([
+#                       transforms.ToTensor(),
+##                       transforms.Normalize((0.5,), (0.3081,))
+#                   ]))
+#test_dataset = datasets.MNIST(data_path, train=False, download=True,
+#                   transform=transforms.Compose([
+#                       transforms.ToTensor(),
+##                       transforms.Normalize((0.5,), (0.3081,))
+#                   ]))
+#train_loader = torch.utils.data.DataLoader(dataset = train_dataset, batch_size=batch_size, shuffle=True)
 
 #        s,d = ep.convert_dataset_batch(data,target, batch_size)
         
