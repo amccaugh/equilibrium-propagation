@@ -9,6 +9,7 @@ from matplotlib import pyplot as plt
 
 import torch
 from torchvision import datasets, transforms
+from torch.utils.data.dataset import Dataset
 import os
 from tqdm import tqdm
 
@@ -110,7 +111,11 @@ class EP_Network(object):
             W = np.random.randn(self.num_neurons,self.num_neurons)*W_mask # The weight matrix for one layer to the next
         
         if symmetric == True:
-            W = np.tril(W) + np.tril(W, k = -1).T        
+            W = np.tril(W) + np.tril(W, k = -1).T
+        # Make sure trace elements are zero so neurons don't self-reference
+        W -= np.eye(self.num_neurons)*W
+        W_mask -= np.eye(self.num_neurons)*W_mask
+        # Convert to Tensor format on the correct device (CPU/GPU)
         W = torch.from_numpy(W).float().to(device) # Convert to float Tensor
         W_mask = torch.from_numpy(W_mask).float().to(device) # .byte() is the closest thing to a boolean tensor pytorch has
          # Line up dimensions so that the zeroth dimension is the batch #
@@ -223,12 +228,14 @@ class EP_Network(object):
         return dW
 
 
-    def train_batch(self, y_target, beta, learning_rate):
+    def train_batch(self, x_data, y_target, beta, learning_rate):
         # Perform free phase evolution
+        self.set_x_state(x_data)
         self.evolve_to_equilbrium(y_target = None, beta = 0)
         s_free_phase = self.s.clone()
         
         # Perform weakly-clamped phase evolution
+        self.set_x_state(x_data)
         self.evolve_to_equilbrium(y_target = y_target, beta = 1)
         s_clamped_phase = self.s.clone()
         
@@ -272,48 +279,62 @@ class Target_MNIST(object):
         return x_data, y_target
 
 
-        
-# FIXME Needs to be updated to match MNIST format
-# Older linear-fit model
-class Target_LinearMatrix(object):
-    def __init__(self):
-        pass
-        # Setup MNIST data loader
 
-    def target_matrix(self, xsize, ysize):
-        """ Generates a target of the form y = Tx
-        """
-        # torch.manual_seed(seed = seed)
-        self.T = torch.rand((1, self.layer_sizes[-1], self.layer_sizes[0]), dtype = dtype)/5
-        return T
-        
-        
-    def generate_inputs_and_targets(self, batch_size, train = True):
-        """ Creates `d`, the target to which `y` will be weakly-clamped
-        """
-    #    d = np.matmul(T,s[:,self.iy])
-        x_data = torch.rand((batch_size, self.layer_sizes[-1], self.layer_sizes[0]), dtype = dtype)/5
-        y_targets = torch.matmul(self.T,x).squeeze()
-        d = torch.zeros(s.shape)
-        d[:,self.iy] = d_values
-        return d
 
-# FIXME
-def validate(self, dataset, num_samples_to_test = 1000):
-    """ Returns the % error validated against the training or test dataset """
-    self.batch_size = 1000
-    train_loader = torch.utils.data.DataLoader(dataset = dataset, shuffle=True)
-    num_samples_evaluated = 0
-    num_correct = 0
-    for batch_idx, (data, target) in enumerate(train_loader):
-        s,d = self.convert_dataset_batch(data,target)
-        s = self.evolve_to_equilbrium(s = s, W = W, d = None, beta = 0)
-        compared = s[:,self.iy].argmax(dim = 1) == d[:,self.iy].argmax(dim = 1)
-        num_samples_evaluated += self.batch_size
-        num_correct += torch.sum(compared)
-        if num_samples_evaluated > num_samples_to_test:
-            break
-    return (1-num_correct.item()/num_samples_evaluated)*100
+
+class MNISTDataset(Dataset):
+    def __init__(self, train = True):
+        data_path = os.path.realpath('./mnist_data/')
+        self.dataset = datasets.MNIST(data_path, train=train, download=True,
+                   transform=transforms.Compose([
+                       transforms.ToTensor(),
+#                       transforms.Normalize((0.5,), (0.3081,))
+                   ]))
+        
+    def __getitem__(self, index):
+        img, label = self.dataset.__getitem__(index)
+        x_data = img.reshape([28*28])
+        y_target = torch.zeros([10])
+        y_target[label] = 1 # Convert to one-hot
+        return (x_data, y_target)
+
+    def __len__(self):
+        return self.dataset.__len__() # of how many examples(images?) you have
+
+    def validate(self, epn, num_samples_to_test = 1000):
+        """ Returns the % error validated against the training or test dataset """
+        batch_size = epn.batch_size
+        dataloader = torch.utils.data.DataLoader(dataset = self, batch_size = batch_size, shuffle=True)
+        num_samples_evaluated = 0
+        num_correct = 0
+        for batch_idx, (x_data, y_target) in enumerate(dataloader):
+            epn.randomize_initial_state(batch_size = batch_size)
+            epn.set_x_state(x_data)
+            s = epn.evolve_to_equilbrium(y_target = None, beta = 0)
+            compared = s[:,epn.iy].argmax(dim = 1) == y_target[:].argmax(dim = 1)
+            num_samples_evaluated += batch_size
+            num_correct += torch.sum(compared)
+            if num_samples_evaluated > num_samples_to_test:
+                break
+        return (1-num_correct.item()/num_samples_evaluated)*100
+
+
+class LinearMatrixDataset(Dataset):
+    def __init__(self, input_size, output_size):
+        self.input_size = input_size
+        self.output_size = output_size
+        self.T = torch.rand((1, output_size, input_size), dtype = dtype)/5
+        
+    def __getitem__(self, index):
+        x_data = torch.rand((self.output_size, self.input_size), dtype = dtype)/5
+        y_target = torch.matmul(self.T,x_data).squeeze()
+        return (x_data, y_target)
+
+    def __len__(self):
+        return 10000 # of how many examples(images?) you have
+
+
+
 #%% Run algorithm
 
 #seed = 2
@@ -389,7 +410,7 @@ def validate(self, dataset, num_samples_to_test = 1000):
     
 seed = 2
 eps = 0.5
-batch_size = 2
+batch_size = 20
 beta = 0.1
 total_tau = 10
 learning_rate = 0.01
@@ -401,6 +422,38 @@ epn = EP_Network(eps=0.5, total_tau=10, batch_size=batch_size, seed=None)
 W, W_mask = epn.initialize_weight_matrix(layer_sizes, seed = seed, kind = 'layered',
                             symmetric = True, density = 0.75)
 epn.randomize_initial_state(batch_size = batch_size)
+
+
+
+dataset = MNISTDataset()
+dataloader = torch.utils.data.DataLoader(dataset = dataset, batch_size=batch_size, shuffle=True)
+
+
+costs = []
+
+error = []
+for epoch in tqdm(range(num_epochs)):
+    for batch_idx, (x_data, y_target) in enumerate(dataloader):
+        epn.train_batch(x_data, y_target, beta, learning_rate)
+        if batch_idx % 20 == 0:
+            cost = torch.mean(epn.C(y_target))
+            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+                epoch, batch_idx * len(x_data), len(dataloader.dataset),
+                100. * batch_idx / len(dataloader), cost.item()))
+        if batch_idx % 500 == 0:
+            train_error = dataset.validate(epn, num_samples_to_test = 1000)
+            test_error = dataset.validate(epn, num_samples_to_test = 1000)
+            print('Validation:  Training error %0.1f%% / Test error %0.1f%%' % (train_error, test_error))
+            error.append([batch_idx, train_error, test_error])
+        costs.append(cost)
+
+
+#%%
+
+
+
+
+
 #T = target_matrix(seed = seed)
 
 T = Target_MNIST()
@@ -434,14 +487,19 @@ epn.plot_states_and_energy(state_list, energy_list)
 #        s,d = ep.convert_dataset_batch(data,target, batch_size)
         
 # Run training loop
+dataset = MNISTDataset()
+dataloader = torch.utils.data.DataLoader(dataset = dataset, batch_size=batch_size, shuffle=True)
+
+
 costs = []
+
 error = []
 for epoch in tqdm(range(num_epochs)):
-    for batch_idx, (data, target) in enumerate(train_loader):
+    for batch_idx, (x_data, y_target) in enumerate(dataloader):
         pass
 #        epoch = 1
-        s,d = ep.convert_dataset_batch(data,target)
-        s,W = ep.train_batch(d, beta, learning_rate)
+#        s,d = ep.convert_dataset_batch(x_data, y_target)
+        epn.train_batch(x_data, y_target, beta, learning_rate)
         if batch_idx % 20 == 0:
             cost = torch.mean(ep.C(s, d))
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
