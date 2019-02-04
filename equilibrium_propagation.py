@@ -47,12 +47,12 @@ def rhoprime(s):
 
 class EP_Network(object):
     
-    def __init__(self, eps = 0.5, total_tau = 10, batch_size = 20, seed = None):
+    def __init__(self, eps = 0.5, total_tau = 10, batch_size = 20, seed = None, layer_sizes = [28*28, 500, 10]):
         if seed is not None:
             torch.manual_seed(seed = seed)
             np.random.seed(seed = seed)
 
-        self.layer_sizes = [28*28, 500, 10]
+        self.layer_sizes = layer_sizes
         self.layer_indices = np.cumsum([0] + self.layer_sizes)
         self.num_neurons = sum(self.layer_sizes)
         self.batch_size = batch_size
@@ -78,7 +78,7 @@ class EP_Network(object):
     def initialize_weight_matrix(self, layer_sizes, seed = None, kind = 'layered', symmetric = True,
                                  density = 0.5, # Value from 0 to 1, used for 'smallworld' and 'sparse' connectivity
                                  ):
-        W = np.zeros([self.num_neurons,self.num_neurons])
+        W = np.zeros([self.num_neurons,self.num_neurons], dtype = np.float)
         W_mask = np.zeros(W.shape, dtype = np.int32)
         if kind == 'layered':
             # Initialize weights matrix, connecting one layer to the next
@@ -113,8 +113,8 @@ class EP_Network(object):
         if symmetric == True:
             W = np.tril(W) + np.tril(W, k = -1).T
         # Make sure trace elements are zero so neurons don't self-reference
-        W -= np.eye(self.num_neurons)*W
-        W_mask -= np.eye(self.num_neurons)*W_mask
+        W -= np.eye(self.num_neurons, dtype = np.float)*W
+        W_mask -= np.eye(self.num_neurons, dtype = np.int32)*W_mask
         # Convert to Tensor format on the correct device (CPU/GPU)
         W = torch.from_numpy(W).float().to(device) # Convert to float Tensor
         W_mask = torch.from_numpy(W_mask).float().to(device) # .byte() is the closest thing to a boolean tensor pytorch has
@@ -316,93 +316,45 @@ class MNISTDataset(Dataset):
             num_correct += torch.sum(compared)
             if num_samples_evaluated > num_samples_to_test:
                 break
-        return (1-num_correct.item()/num_samples_evaluated)*100
+        error = (1-num_correct.item()/num_samples_evaluated)
+        return error
 
 
 class LinearMatrixDataset(Dataset):
-    def __init__(self, input_size, output_size):
+    def __init__(self, input_size, output_size, length = 10000):
         self.input_size = input_size
         self.output_size = output_size
-        self.T = torch.rand((1, output_size, input_size), dtype = dtype)/5
+        self.T = torch.rand((output_size, input_size), dtype = dtype)/5
+        self.length = int(length)
         
     def __getitem__(self, index):
-        x_data = torch.rand((self.output_size, self.input_size), dtype = dtype)/5
+        x_data = torch.rand((self.input_size, 1), dtype = dtype).squeeze()/5
         y_target = torch.matmul(self.T,x_data).squeeze()
         return (x_data, y_target)
 
     def __len__(self):
-        return 10000 # of how many examples(images?) you have
+        return self.length # of how many examples(images?) you have
+
+    def validate(self, epn, num_samples_to_test = 1000):
+        batch_size = epn.batch_size
+        dataloader = torch.utils.data.DataLoader(dataset = self, batch_size = batch_size, shuffle=True)
+        num_samples_evaluated = 0
+        total_error = 0
+        for batch_idx, (x_data, y_target) in enumerate(dataloader):
+            epn.randomize_initial_state(batch_size = batch_size)
+            epn.set_x_state(x_data)
+            s = epn.evolve_to_equilbrium(y_target = None, beta = 0)
+            y = s[:,epn.iy]
+            total_error += torch.sum(torch.abs(y-y_target)).item()
+#            compared = s[:,epn.iy].argmax(dim = 1) == y_target[:].argmax(dim = 1)
+            num_samples_evaluated += batch_size
+#            num_correct += torch.sum(compared)
+            if num_samples_evaluated > num_samples_to_test:
+                break
+        error = total_error/num_samples_evaluated/y_target.size()[1]
+        return error
 
 
-
-#%% Run algorithm
-
-#seed = 2
-#eps = 0.01
-#batch_size = 20
-#beta = 0.1
-#total_tau = 10
-#learning_rate = 1e-2
-#W, W_mask = initialize_weight_matrix(self.layer_sizes, seed = seed, kind = 'layered', symmetric = True)
-#T = target_matrix(seed = seed)
-#
-#states = []
-#energies = []
-#costs = []
-#for n in range(100):
-#    s = randomize_initial_state(batch_size = batch_size)
-#    d = generate_targets(s, T)
-#    
-#    s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = total_tau)
-##                             state_list = states, energy_list = energies)
-#    s_free_phase = s.clone()
-#    
-#    s = evolve_to_equilbrium(s = s, W = W, d = d, beta = 1, eps = eps, total_tau = total_tau)
-##                             state_list = states, energy_list = energies)
-#    s_clamped_phase = s.clone()
-##    plot_states_and_energy(states, energies)
-#    
-#    W = update_weights(W, beta, s_free_phase, s_clamped_phase, learning_rate = learning_rate)
-#    costs.append(torch.mean(C(s, d)).item())
-
-#plot(costs)
-
-#%% Plot energies
-    
-#seed = 1
-#eps = 0.01
-#batch_size = 1
-#beta = 0.1
-#total_tau = 10
-#learning_rate = 1e-3
-#
-#
-#ep = EP(eps = 0.5, total_tau = 10, batch_size = 20, seed = None)
-#
-#W, W_mask = initialize_weight_matrix(self.layer_sizes, seed = seed,
-#                                     kind = 'fc', symmetric = True, density = 0.75)
-#T = target_matrix(seed = seed)
-#
-#states = []
-#energies = []
-#costs = []
-#
-#s = randomize_initial_state(batch_size = batch_size)
-##    x = s[:,self.ix]
-##    y = s[:,self.iy]
-#d = generate_targets(s, T)
-#
-#s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = total_tau,
-#                     state_list = states, energy_list = energies)
-#s_free_phase = s.clone()
-#
-#s = evolve_to_equilbrium(s = s, W = W, d = d, beta = 1, eps = eps, total_tau = total_tau,
-#                     state_list = states, energy_list = energies)
-#s_clamped_phase = s.clone()
-#plot_states_and_energy(states, energies)
-#
-#W = update_weights(W, beta, s_free_phase, s_clamped_phase, learning_rate = 1e-3)
-#costs.append(torch.mean(C(s, d)).item())
 
     
 #%% Thing
@@ -413,19 +365,18 @@ eps = 0.5
 batch_size = 20
 beta = 0.1
 total_tau = 10
-learning_rate = 0.01
+learning_rate = 1e-2
 num_epochs = 1
 
-layer_sizes = [28*28, 500, 10]
+layer_sizes = [50, 150, 50]
 
-epn = EP_Network(eps=0.5, total_tau=10, batch_size=batch_size, seed=None)
+epn = EP_Network(eps=0.5, total_tau=10, batch_size=batch_size, seed=None, layer_sizes = layer_sizes)
 W, W_mask = epn.initialize_weight_matrix(layer_sizes, seed = seed, kind = 'layered',
                             symmetric = True, density = 0.75)
 epn.randomize_initial_state(batch_size = batch_size)
 
-
-
-dataset = MNISTDataset()
+#dataset = MNISTDataset()
+dataset = LinearMatrixDataset(input_size = epn.layer_sizes[0], output_size = epn.layer_sizes[-1], length = 100000)
 dataloader = torch.utils.data.DataLoader(dataset = dataset, batch_size=batch_size, shuffle=True)
 
 
@@ -434,6 +385,7 @@ costs = []
 error = []
 for epoch in tqdm(range(num_epochs)):
     for batch_idx, (x_data, y_target) in enumerate(dataloader):
+        x_data, y_target = x_data.to(device), y_target.to(device)
         epn.train_batch(x_data, y_target, beta, learning_rate)
         if batch_idx % 20 == 0:
             cost = torch.mean(epn.C(y_target))
@@ -443,29 +395,39 @@ for epoch in tqdm(range(num_epochs)):
         if batch_idx % 500 == 0:
             train_error = dataset.validate(epn, num_samples_to_test = 1000)
             test_error = dataset.validate(epn, num_samples_to_test = 1000)
-            print('Validation:  Training error %0.1f%% / Test error %0.1f%%' % (train_error, test_error))
+            print('Validation:  Training error %0.4f / Test error %0.4f' % (train_error, test_error))
             error.append([batch_idx, train_error, test_error])
         costs.append(cost)
 
 
-#%%
+#%% Plot state energies
 
+seed = 2
+eps = 0.5
+batch_size = 2
+beta = 0.1
+total_tau = 10
+learning_rate = 0.01
+num_epochs = 1
 
+layer_sizes = [8, 9, 10]
 
+epn = EP_Network(eps=0.5, total_tau=10, batch_size=batch_size, seed=None, layer_sizes = layer_sizes)
+W, W_mask = epn.initialize_weight_matrix(layer_sizes, seed = seed, kind = 'layered',
+                            symmetric = True, density = 0.75)
+epn.randomize_initial_state(batch_size = batch_size)
 
+dataset = LinearMatrixDataset(input_size = epn.layer_sizes[0], output_size = epn.layer_sizes[-1])
+dataloader = torch.utils.data.DataLoader(dataset = dataset, batch_size=batch_size, shuffle=True)
 
-#T = target_matrix(seed = seed)
-
-T = Target_MNIST()
-x_data, y_target = T.generate_inputs_and_targets(batch_size = batch_size)
-
-epn.step(beta = 0, y_target = None)
-epn.step(beta = 1, y_target = y_target)
+x_data, y_target = next(iter(dataloader))
+x_data, y_target = x_data.to(device), y_target.to(device)
 
 state_list = []
 energy_list = []
+epn.set_x_state(x_data)
 epn.evolve_to_equilbrium(y_target, beta = 0, state_list = state_list, energy_list = energy_list)
-epn.evolve_to_equilbrium(y_target, beta = 1, state_list = state_list, energy_list = energy_list)
+epn.evolve_to_equilbrium(y_target, beta = 0.1, state_list = state_list, energy_list = energy_list)
 epn.plot_states_and_energy(state_list, energy_list)
 
 #%%
