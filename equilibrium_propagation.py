@@ -99,7 +99,7 @@ class EP_Network(object):
         elif kind == 'fc':
             # Create a fully-connected weight matrix
             W = np.random.randn(self.num_neurons,self.num_neurons) # The weight matrix for one layer to the next
-            W *= np.sqrt(1/(self.num_neurons))
+            W *= np.sqrt(2/(self.num_neurons))
             W_mask += 1
         elif kind == 'smallworld':
             # Create a small-world-connectivity matrix
@@ -115,6 +115,10 @@ class EP_Network(object):
         # Make sure trace elements are zero so neurons don't self-reference
         W -= np.eye(self.num_neurons, dtype = np.float)*W
         W_mask -= np.eye(self.num_neurons, dtype = np.int32)*W_mask
+        # Disconnect input and output neurons
+        W_mask[self.iy,self.ix] *= 0
+        W_mask[self.ix,self.iy] *= 0
+        W *= W_mask
         # Convert to Tensor format on the correct device (CPU/GPU)
         W = torch.from_numpy(W).float().to(device) # Convert to float Tensor
         W_mask = torch.from_numpy(W_mask).float().to(device) # .byte() is the closest thing to a boolean tensor pytorch has
@@ -207,10 +211,11 @@ class EP_Network(object):
             # Plot state_list
             t = np.linspace(0,len(state_list) * eps, len(state_list))
             fig, ax = plt.subplots(2,1, sharex = True)
-            ax[0].plot(t, np.array(state_list)[:,self.ih],'r')
-            ax[0].plot(t, np.array(state_list)[:,self.ix],'g')
-            ax[0].plot(t, np.array(state_list)[:,self.iy],'b')
+            lines1 = ax[0].plot(t, np.array(state_list)[:,self.ih],'b--', label = 'h_hidden')
+            lines2 = ax[0].plot(t, np.array(state_list)[:,self.ix],'g', label = 'x_input')
+            lines3 = ax[0].plot(t, np.array(state_list)[:,self.iy],'r', label = 'y_output')
             ax[0].set_ylabel('State values')
+            ax[0].legend([lines1[0], lines2[0], lines3[0]], ['h_hidden','x_input','y_output'])
             
             ax[1].plot(t, np.array(energy_list),'b.-')
             ax[1].set_ylabel('Energy F')
@@ -368,15 +373,16 @@ total_tau = 10
 learning_rate = 1e-2
 num_epochs = 1
 
-layer_sizes = [50, 150, 50]
+#layer_sizes = [50, 150, 50]
+layer_sizes = [28*28, 500, 10]
 
 epn = EP_Network(eps=0.5, total_tau=10, batch_size=batch_size, seed=None, layer_sizes = layer_sizes)
-W, W_mask = epn.initialize_weight_matrix(layer_sizes, seed = seed, kind = 'layered',
+W, W_mask = epn.initialize_weight_matrix(layer_sizes, seed = seed, kind = 'sparse',
                             symmetric = True, density = 0.75)
 epn.randomize_initial_state(batch_size = batch_size)
 
-#dataset = MNISTDataset()
-dataset = LinearMatrixDataset(input_size = epn.layer_sizes[0], output_size = epn.layer_sizes[-1], length = 100000)
+dataset = MNISTDataset()
+#dataset = LinearMatrixDataset(input_size = epn.layer_sizes[0], output_size = epn.layer_sizes[-1], length = 100000)
 dataloader = torch.utils.data.DataLoader(dataset = dataset, batch_size=batch_size, shuffle=True)
 
 
@@ -410,10 +416,10 @@ total_tau = 10
 learning_rate = 0.01
 num_epochs = 1
 
-layer_sizes = [8, 9, 10]
+layer_sizes = [4, 15, 2]
 
 epn = EP_Network(eps=0.5, total_tau=10, batch_size=batch_size, seed=None, layer_sizes = layer_sizes)
-W, W_mask = epn.initialize_weight_matrix(layer_sizes, seed = seed, kind = 'layered',
+W, W_mask = epn.initialize_weight_matrix(layer_sizes, seed = seed, kind = 'fc',
                             symmetric = True, density = 0.75)
 epn.randomize_initial_state(batch_size = batch_size)
 
