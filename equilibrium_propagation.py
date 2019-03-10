@@ -3,6 +3,7 @@
 # diagrams
 
 # TODO: Convert to class so mhy, mx, etc are available as local variables
+# TODO: Eq: Get FC model working by having all weights reduce proportionally when neuron stressed
 
 import numpy as np
 from matplotlib import pyplot as plt
