@@ -1,171 +1,403 @@
+# TO FIX: In non-layered connections, the neurons are likely saturating due to
+# large amounts of integrated input from all the other neurons; check energy
+# diagrams
+
+# TODO: Convert to class so mhy, mx, etc are available as local variables
+
 import numpy as np
 from matplotlib import pyplot as plt
 
+import torch
+from torchvision import datasets, transforms
+import os
+from tqdm import tqdm
+
+#device = torch.device('cpu'); torch.set_default_tensor_type(torch.FloatTensor)
+device = torch.device('cuda'); torch.set_default_tensor_type(torch.cuda.FloatTensor)
+torch.set_default_dtype(torch.float)
+dtype = torch.float
+
 
 # TODO / things to try:
-# - Divide weight matrix by 10
-# - Disable state clipping / allow neuron states to be negative (Bengio STDP-compatible allows it!)
-# - Try small-world style W_exists (~N/2^k W_exists per layer to layers k distance away)
+# Divide weight matrix by 10
+# Implement randomize_beta (beta gets chosen from randn(1) and see if it helps
+
+#%% Check pytorch can use GPU - https://stackoverflow.com/questions/48152674/how-to-check-if-pytorch-is-using-the-gpu
+#torch.cuda.current_device()
+#torch.cuda.device(0)
+#torch.cuda.device_count()
+#torch.cuda.get_device_name(0)
+#torch.cuda.empty_cache()
 
 
 #%% Neuron implementation
-np.random.seed(seed = 0)
+# Following pytorch example from https://pytorch.org/tutorials/beginner/pytorch_with_examples.html
+# Helpful short and to-the-point torch tutorial: https://jhui.github.io/2018/02/09/PyTorch-Basic-operations/
+torch.manual_seed(seed = 0)
 
-
-layer_sizes = [12, 25, 10]
+layer_sizes = [28*28, 500, 10]
 layer_indices = np.cumsum([0] + layer_sizes)
 num_neurons = sum(layer_sizes)
 
 # Set up indices of neurons for easy access later
-ix = list(range(0, layer_indices[1]))
-iy = list(range(layer_indices[-2], layer_indices[-1]))
-ih = list(range(layer_indices[1], layer_indices[-2]))
-ihy = list(range(layer_indices[1], layer_indices[-1]))
+ix = slice(0, layer_indices[1])
+iy = slice(layer_indices[-2], layer_indices[-1])
+ih = slice(layer_indices[1], layer_indices[-2])
+ihy = slice(layer_indices[1], layer_indices[-1])
 
-def intialize_weight_matrix(layer_sizes, seed = None):
-    W = np.zeros([num_neurons,num_neurons])
-    W_exists = np.zeros(W.shape)
-    # Initialize weights matrix
-    for n in range(len(layer_sizes)-1): # Make weights only exist from one layer to the next
-        wll = np.random.randn(layer_sizes[n+1],layer_sizes[n]) # The weight matrix for one layer to the next
-        wll *= np.sqrt(2/(layer_sizes[n]))     # Glorot-Bengio (Xavier) weight normalization
-    #    wll *= 0.2
-        i = layer_indices[n+1]
-        j = layer_indices[n]
-        di = wll.shape[0]
-        dj = wll.shape[1]
-        W[i:i+di, j:j+dj] = wll
-        W_exists[i:i+di, j:j+dj] = wll*0 + 1
-    W += W.T # Make weights symmetric
-    W_exists += W_exists.T
-    return W, W_exists
+# Create masks for state, because updating slices of a matrix is slow
+mx = torch.zeros([1, num_neurons])
+my = torch.zeros([1, num_neurons])
+mh = torch.zeros([1, num_neurons])
+mhy = torch.zeros([1, num_neurons])
+mx[:,ix] = 1
+my[:,iy] = 1
+mh[:,ih] = 1
+mhy[:,ihy] = 1
 
-# Initialize state matrix
-def initialize_state(x = None, seed = None):
+def initialize_weight_matrix(layer_sizes, seed = None, kind = 'layered', symmetric = True,
+                             density = 0.5, # Value from 0 to 1, used for 'smallworld' and 'sparse' connectivity
+                             ):
     np.random.seed(seed = seed)
-    s = np.random.rand(num_neurons)
-    if x is not None: s[ix] = x
-    s = np.matrix(s).T
+    W = np.zeros([num_neurons,num_neurons])
+    W_mask = np.zeros(W.shape, dtype = np.int32)
+    if kind == 'layered':
+        # Initialize weights matrix, connecting one layer to the next
+        for n in range(len(layer_sizes)-1): # Make weights only exist from one layer to the next
+            wll = np.random.randn(layer_sizes[n+1],layer_sizes[n]) # The weight matrix for one layer to the next
+            wll2 = np.random.randn(layer_sizes[n],layer_sizes[n+1]) # The weight matrix for the reverse
+            wll *= np.sqrt(2/(layer_sizes[n]))     # Glorot-Bengio (Xavier) weight normalization
+            wll2 *= np.sqrt(2/(layer_sizes[n]))     # Glorot-Bengio (Xavier) weight normalization
+        #    wll *= 0.2; wll2 *= 0.2
+            i = layer_indices[n+1]
+            j = layer_indices[n]
+            di = wll.shape[0]
+            dj = wll.shape[1]
+            W[i:i+di, j:j+dj] = wll
+            W[j:j+dj, i:i+di] = wll2
+            W_mask[i:i+di, j:j+dj] = wll*0 + 1
+            W_mask[j:j+dj, i:i+di] = wll2*0 + 1
+    elif kind == 'fc':
+        # Create a fully-connected weight matrix
+        W = np.random.randn(num_neurons,num_neurons) # The weight matrix for one layer to the next
+        W *= np.sqrt(1/(num_neurons))
+        W_mask += 1
+    elif kind == 'smallworld':
+        # Create a small-world-connectivity matrix
+        pass
+    elif kind == 'sparse':
+        # Creates random connections.  If symmetric=False, most connections will
+        # be simplex, not duplex.  Uses density parameter
+        W_mask = np.random.binomial(n = 1, p = density, size = W.shape)
+        W = np.random.randn(num_neurons,num_neurons)*W_mask # The weight matrix for one layer to the next
+    
+    if symmetric == True:
+        W = np.tril(W) + np.tril(W, k = -1).T        
+    W = torch.from_numpy(W).float().to(device) # Convert to float Tensor
+    W_mask = torch.from_numpy(W_mask).float().to(device) # .byte() is the closest thing to a boolean tensor pytorch has
+     # Line up dimensions so that the zeroth dimension is the batch #
+    W = W.unsqueeze(0)
+    W_mask = W_mask.unsqueeze(0)
+    return W, W_mask
+
+
+def random_initial_state(batch_size = 7):
+    s = torch.rand(batch_size, num_neurons)
     return s
 
-
 def rho(s):
+    return torch.clamp(s,0,1)
+
+def rho_old(s):
     return np.clip(s,0,1)
 
 def rhoprime(s):
-    rp = s*0
+    rp = torch.zeros(s.shape)
     rp[(0<=s) & (s<=1)] = 1 # SUPER IMPORTANT! if (0<s) & (s<1) zeros + ones cannot escape
     return rp
 
 def E(s, W):
-    term1 = 0.5*s.T*s
-    term2 = -0.5 * rho(s).T @ W @ rho(s)
+    term1 = 0.5*torch.sum(s*s, dim = 1)
+    rho_s = rho(s)
+    term2 = torch.matmul(rho_s.unsqueeze(2), rho_s.unsqueeze(1))
+    term2 *= W
+    term2 = -0.5 * torch.sum(term2, dim = [1,2])
 #    term3 = -np.sum([b[i]*rho(s[i]) for i in range(len(b))])
-    return sum(term1 + term2) # + term3
+    return term1 + term2 # + term3
+    
+def C(s, d):
+    y = s*my
+    return 0.5*torch.norm(y-d, dim = 1)**2
 
-def C(y, d):
-    return 0.5*np.linalg.norm(y-d)**2
 
 def F(s, W, beta, d):
     if beta == 0:
         return E(s, W)
-    return sum(E(s, W) + beta*C(y = s[iy], d = d)) # + term3
+    return E(s, W) + beta*C(s, d = d) # + term3
 
 def step(s, W, eps, beta, d):
-    Rs = np.matmul(W,rho(s))
-    s[ihy] += eps*(Rs - s)[ihy] # dE/ds term, multiplied by dt (epsilon)
+    # s - shape (batch_size, num_neurons)
+    # W - shape (num_neurons, num_neurons)
+    # beta - constant
+    # d - shape (batch_size, num_neurons)
+#    %%timeit
+#    Rs = (W @ rho(s).unsqueeze(2)).squeeze() # Slow, correct
+    Rs = (rho(s) @ W).squeeze() # Fast, but reliant on W being symmetric
+    # Rs - shape (batch_size, num_neurons)
+    dEds = eps*(Rs - s) # dE/ds term, multiplied by dt (epsilon)
+    dEds *= mhy # Mask dEds so it only adds to h and y units
+    s += dEds
     if beta != 0:
-        s[iy]  += eps*beta*(d - s[iy]) # beta*dC/ds weak-clamping term, multiplied by dt (epsilon)
+        dCds = eps*beta*(d - s) # beta*dC/ds weak-clamping term, mul tiplied by dt (epsilon)
+        dCds *= my # Mask dCds so it only adds to y (output) units
+        s += dCds
     # Clipping prevents states from becoming negative due to bad (Euler) time integration
     # Also, clipping = equivalent to multiplying R(s) by rhoprime(s) when beta = 0
-    s[ihy] = np.clip(s[ihy], 0, 1)  
+    torch.clamp(s, 0, 1, out = s)
     return s
-    
+
+
 def evolve_to_equilbrium(s, W, d, beta, eps, total_tau,
                          state_list = None, energy_list = None):
     # If state_recorder is passed an (empty) list, it will append each state to it
     num_steps = int(total_tau/eps)
     for n in range(num_steps):
         step(s, W, eps = eps, beta = beta, d = d)
-        if state_list is not None: states.append(np.array(s).flatten().tolist())
-        if energy_list is not None: energies.append(F(s, W, beta, d))
+        if state_list is not None: states.append(s.cpu().numpy().copy())
+        if energy_list is not None: energies.append(F(s, W, beta, d).cpu().numpy().copy())
     return s
+
     
 def plot_states_and_energy(states, energies):
-    # Plot states
-    t = np.linspace(0,len(states) * eps, len(states))
-    fig, ax = plt.subplots(2,1, sharex = True)
-    ax[0].plot(t, np.array(states)[:,ih],'r')
-    ax[0].plot(t, np.array(states)[:,ix],'g')
-    ax[0].plot(t, np.array(states)[:,iy],'b')
-    ax[0].set_ylabel('State values')
-    
-    ax[1].plot(t, np.array(energies),'b.-')
-    ax[1].set_ylabel('Energy E')
-    ax[1].set_xlabel('Time (t/tau)')
+    states_batch = states
+    energies_batch = energies
+    for n in range(np.array(states_batch).shape[1]):
+        states = np.array(states_batch)[:,n,:]
+        energies = np.array(energies_batch)[:,n]
+        # Plot states
+        t = np.linspace(0,len(states) * eps, len(states))
+        fig, ax = plt.subplots(2,1, sharex = True)
+        ax[0].plot(t, np.array(states)[:,ih],'r')
+        ax[0].plot(t, np.array(states)[:,ix],'g')
+        ax[0].plot(t, np.array(states)[:,iy],'b')
+        ax[0].set_ylabel('State values')
+        
+        ax[1].plot(t, np.array(energies),'b.-')
+        ax[1].set_ylabel('Energy F')
+        ax[1].set_xlabel('Time (t/tau)')
+
 
 # Weight update
-def weight_update(W, W_exists, beta, s_free_phase, s_clamped_phase):
-    # W_exists = matrix of shape(W) with 1s or zeros based on 
+def weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase):
+    # W_mask = matrix of shape(W) with 1s or zeros based on 
     # whether the connection / weight between i and j exists
-    dW = 1/beta*(rho(s_clamped_phase) @ rho(s_clamped_phase).T - 
-                 rho(s_free_phase) @ rho(s_free_phase).T
-                 )
-    dW = np.multiply(dW, W_exists)
+    term1 = torch.unsqueeze(rho(s_clamped_phase),dim = 2) @ torch.unsqueeze(rho(s_clamped_phase),dim = 1) # This also works instead of einsum
+    term2 = torch.unsqueeze(rho(s_free_phase), dim = 2) @ torch.unsqueeze(rho(s_free_phase), dim = 1) # This also works instead of einsum
+    dW = 1/beta*(term1 - term2)
+    dW *= W_mask
     return dW
 
 
-#%% Plot states and energies
+def update_weights(W, beta, s_free_phase, s_clamped_phase, learning_rate = 1):
+    dW = weight_update(W, W_mask, beta, s_free_phase, s_clamped_phase)
+    W += torch.mean(dW, dim = 0)*learning_rate
+    return W
+
+
+def train_batch(s,W,d, beta, eps, total_tau, learning_rate):
+    s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = total_tau)
+    s_free_phase = s.clone()
+    
+    s = evolve_to_equilbrium(s = s, W = W, d = d, beta = 1, eps = eps, total_tau = total_tau)
+    s_clamped_phase = s.clone()
+    
+    W = update_weights(W, beta, s_free_phase, s_clamped_phase, learning_rate = learning_rate)
+    return s, W
+
+
+def convert_dataset_batch(data, target, batch_size):
+    """ Convert the dataset "data" and "target" variables to s and d """
+    data, target = data.to(device), target.to(device)
+    data = data.reshape([batch_size, 28*28]) # Flatten
+    d_target = torch.zeros([batch_size, 10])
+    for n in range(batch_size):
+        d_target[n, target[n]] = 1 # Convert to one-hot
+        
+    # Setup intitial state s and target d
+    s = random_initial_state(batch_size = batch_size)
+    s[:,ix] = data
+    d = torch.zeros(s.shape)
+    d[:,iy] = d_target
+    return s,d
+
+
+def validate(dataset, num_samples_to_test = 1000):
+    """ Returns the % error validated against the training or test dataset """
+    batch_size = 1000
+    train_loader = torch.utils.data.DataLoader(dataset = dataset, batch_size=batch_size, shuffle=True)
+    num_samples_evaluated = 0
+    num_correct = 0
+    for batch_idx, (data, target) in enumerate(train_loader):
+        s,d = convert_dataset_batch(data,target, batch_size)
+        s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = total_tau)
+        compared = s[:,iy].argmax(dim = 1) == d[:,iy].argmax(dim = 1)
+        num_samples_evaluated += batch_size
+        num_correct += torch.sum(compared)
+        if num_samples_evaluated > num_samples_to_test:
+            break
+    return (1-num_correct.item()/num_samples_evaluated)*100
+
+# Older linear-fit model
+    
+def target_matrix(seed = None):
+    """ Generates a target of the form y = Tx
+    """
+    torch.manual_seed(seed = seed)
+    T = torch.rand((1, layer_sizes[-1], layer_sizes[0]), dtype = dtype)/5
+    return T
+    
+    
+def generate_targets(s, T):
+    """ Creates `d`, the target to which `y` will be weakly-clamped
+    """
+#    d = np.matmul(T,s[:,iy])
+    x = s[:,ix].unsqueeze(2)
+    d_values = torch.matmul(T,x).squeeze()
+    d = torch.zeros(s.shape)
+    d[:,iy] = d_values
+    return d
+
+#%% Run algorithm
+
+#seed = 2
+#eps = 0.01
+#batch_size = 20
+#beta = 0.1
+#total_tau = 10
+#learning_rate = 1e-2
+#W, W_mask = initialize_weight_matrix(layer_sizes, seed = seed, kind = 'layered', symmetric = True)
+#T = target_matrix(seed = seed)
+#
+#states = []
+#energies = []
+#costs = []
+#for n in range(100):
+#    s = random_initial_state(batch_size = batch_size)
+#    d = generate_targets(s, T)
+#    
+#    s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = total_tau)
+##                             state_list = states, energy_list = energies)
+#    s_free_phase = s.clone()
+#    
+#    s = evolve_to_equilbrium(s = s, W = W, d = d, beta = 1, eps = eps, total_tau = total_tau)
+##                             state_list = states, energy_list = energies)
+#    s_clamped_phase = s.clone()
+##    plot_states_and_energy(states, energies)
+#    
+#    W = update_weights(W, beta, s_free_phase, s_clamped_phase, learning_rate = learning_rate)
+#    costs.append(torch.mean(C(s, d)).item())
+
+#plot(costs)
+
+#%% Plot energies
+    
 seed = 1
 eps = 0.01
-s = initialize_state(seed = seed)
-W,W_exists = intialize_weight_matrix(layer_sizes = layer_sizes, seed = seed)
+batch_size = 1
+beta = 0.1
+total_tau = 10
+learning_rate = 1e-3
+W, W_mask = initialize_weight_matrix(layer_sizes, seed = seed,
+                                     kind = 'fc', symmetric = True, density = 0.75)
+T = target_matrix(seed = seed)
 
 states = []
 energies = []
-s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = 10,
-                         state_list = states, energy_list = energies)
-s_free_phase = s.copy()
+costs = []
 
-d = np.zeros([10,1])
-d[3] = 0.5
-s = evolve_to_equilbrium(s = s, W = W, d = d, beta = 1, eps = eps, total_tau = 10,
-                         state_list = states, energy_list = energies)
-s_clamped_phase = s.copy()
+s = random_initial_state(batch_size = batch_size)
+#    x = s[:,ix]
+#    y = s[:,iy]
+d = generate_targets(s, T)
+
+s = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = total_tau,
+                     state_list = states, energy_list = energies)
+s_free_phase = s.clone()
+
+s = evolve_to_equilbrium(s = s, W = W, d = d, beta = 1, eps = eps, total_tau = total_tau,
+                     state_list = states, energy_list = energies)
+s_clamped_phase = s.clone()
 plot_states_and_energy(states, energies)
 
-dW = weight_update(W, W_exists, beta, s_free_phase, s_clamped_phase)
+W = update_weights(W, beta, s_free_phase, s_clamped_phase, learning_rate = 1e-3)
+costs.append(torch.mean(C(s, d)).item())
+
+    
+#%% Thing
+
+    
+seed = 2
+eps = 0.5
+batch_size = 20
+beta = 0.1
+total_tau = 10
+learning_rate = 0.01
+num_epochs = 1
+W, W_mask = initialize_weight_matrix(layer_sizes, seed = seed,
+                                     kind = 'fc', symmetric = True, density = 0.75)
+#T = target_matrix(seed = seed)
+
+# Setup MNIST data loader
+data_path = os.path.realpath('./mnist_data/')
+train_dataset = datasets.MNIST(data_path, train=True, download=True,
+                   transform=transforms.Compose([
+                       transforms.ToTensor(),
+#                       transforms.Normalize((0.5,), (0.3081,))
+                   ]))
+test_dataset = datasets.MNIST(data_path, train=False, download=True,
+                   transform=transforms.Compose([
+                       transforms.ToTensor(),
+#                       transforms.Normalize((0.5,), (0.3081,))
+                   ]))
+train_loader = torch.utils.data.DataLoader(dataset = train_dataset, batch_size=batch_size, shuffle=True)
+
+# Run training loop
+costs = []
+error = []
+for epoch in tqdm(range(num_epochs)):
+    for batch_idx, (data, target) in enumerate(train_loader):
+#        epoch = 1
+        s,d = convert_dataset_batch(data,target, batch_size)
+        s,W = train_batch(s, W, d, beta, eps, total_tau, learning_rate)
+        if batch_idx % 20 == 0:
+            cost = torch.mean(C(s, d))
+            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+                epoch, batch_idx * len(data), len(train_loader.dataset),
+                100. * batch_idx / len(train_loader), cost.item()))
+        if batch_idx % 500 == 0:
+            train_error = validate(train_dataset, num_samples_to_test = 10000)
+            test_error = validate(test_dataset, num_samples_to_test = 10000)
+            print('Validation:  Training error %0.1f%% / Test error %0.1f%%' % (train_error, test_error))
+            error.append([batch_idx, train_error, test_error])
+#        costs.append(cost)
+
+#%%
+
+# See how symmetric the weights are
+X = W.squeeze().cpu().numpy().copy()
+M = np.array(W_mask.cpu().numpy().copy(), dtype = np.bool)
+Y = X - X.T
+Z = X / X.T
+np.std(X.flatten()[M.flatten()])
+np.std(Y.flatten()[M.flatten()])
+np.mean(Z.flatten()[M.flatten()])
+np.median(Z.flatten()[M.flatten()])
+Z.flatten()[M.flatten()]
+plt.hist(Z.flatten()[M.flatten()])
+max(Z.flatten()[M.flatten()])
+np.max(X)
+plt.hist(np.clip(Z.flatten()[M.flatten()],-5,5))
+plt.hist(np.clip(Z.flatten()[M.flatten()],-5,5), bins = 100)
 
 
-#%% Run algorithm
-    
-def load():
-    with open("mnist.pkl",'rb') as f:
-        mnist = pickle.load(f)
-    return mnist["training_images"], mnist["training_labels"], mnist["test_images"], mnist["test_labels"]
-# Load mnist data
-x_train, t_train, x_test, t_test = load()
-
-# quick
-dW_list = []
-for n in range(1000):
-    # Set parameters
-    eps = 0.01
-    total_tau = 2
-    beta = 1
-    
-    # Select input
-    m = 1
-    x = x_train[m,:]
-    num = t_train[m]
-    d = np.zeros([10,1]); d[num] = 1
-    
-    # Perform weight update from one sample
-    s = initialize_state(x = x)
-    W,W_exists = intialize_weight_matrix(layer_sizes = layer_sizes)
-    s_free_phase = evolve_to_equilbrium(s = s, W = W, d = None, beta = 0, eps = eps, total_tau = total_tau).copy()
-    s_clamped_phase = evolve_to_equilbrium(s = s, W = W, d = d, beta = beta, eps = eps, total_tau = total_tau).copy()
-    dW = weight_update(W, W_exists, s_free_phase, s_clamped_phase)
-    dW_list.append(dW.std())
-    W += dW
-plot(dW_list)
+plt.hist(X.flatten()[M.flatten()], bins = 100)
