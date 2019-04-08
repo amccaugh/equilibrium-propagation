@@ -11,12 +11,9 @@ import torch
 from torchvision import datasets, transforms
 from torch.utils.data.dataset import Dataset
 import os
-from tqdm import tqdm
 
 #device = torch.device('cpu'); torch.set_default_tensor_type(torch.FloatTensor)
-device = torch.device('cuda'); torch.set_default_tensor_type(torch.cuda.FloatTensor)
-torch.set_default_dtype(torch.float)
-dtype = torch.float
+
 
 
 # TODO / things to try:
@@ -45,9 +42,9 @@ def rhoprime(s):
     return rp
 
 
-class EP_Network(object):
+class EQP_Network(object):
     
-    def __init__(self, eps = 0.5, total_tau = 10, batch_size = 20, seed = None, layer_sizes = [28*28, 500, 10]):
+    def __init__(self, eps = 0.5, total_tau = 10, batch_size = 20, seed = None, layer_sizes = [28*28, 500, 10], device = None, dtype = torch.float):
         if seed is not None:
             torch.manual_seed(seed = seed)
             np.random.seed(seed = seed)
@@ -74,6 +71,9 @@ class EP_Network(object):
         self.my[:,self.iy] = 1
         self.mh[:,self.ih] = 1
         self.mhy[:,self.ihy] = 1
+
+        self.device = device
+        self.dtype = dtype
 
     def initialize_weight_matrix(self, layer_sizes, seed = None, kind = 'layered', symmetric = True,
                                  density = 0.5, # Value from 0 to 1, used for 'smallworld' and 'sparse' connectivity
@@ -120,8 +120,8 @@ class EP_Network(object):
         W_mask[self.ix,self.iy] *= 0
         W *= W_mask
         # Convert to Tensor format on the correct device (CPU/GPU)
-        W = torch.from_numpy(W).float().to(device) # Convert to float Tensor
-        W_mask = torch.from_numpy(W_mask).float().to(device) # .byte() is the closest thing to a boolean tensor pytorch has
+        W = torch.from_numpy(W).float().to(self.device) # Convert to float Tensor
+        W_mask = torch.from_numpy(W_mask).float().to(self.device) # .byte() is the closest thing to a boolean tensor pytorch has
          # Line up dimensions so that the zeroth dimension is the batch #
         self.W = W.unsqueeze(0)
         self.W_mask = W_mask.unsqueeze(0)
@@ -174,7 +174,7 @@ class EP_Network(object):
     #    Rs = (W @ rho(s).unsqueeze(2)).squeeze() # Slow, correct
         # s = self.s
         # W = self.W
-        Rs = (rho(self.s) @ W).squeeze() # Fast, but reliant on W being symmetric
+        Rs = (rho(self.s) @ self.W).squeeze() # Fast, but reliant on W being symmetric
         # Rs - shape (batch_size, self.num_neurons)
         dEds = self.eps*(Rs - self.s) # dE/ds term, multiplied by dt (epsilon)
         dEds *= self.mhy # Mask dEds so it only adds to h and y units
@@ -209,7 +209,7 @@ class EP_Network(object):
             state_list = np.array(state_list_batch)[:,n,:]
             energy_list = np.array(energy_list_batch)[:,n]
             # Plot state_list
-            t = np.linspace(0,len(state_list) * eps, len(state_list))
+            t = np.linspace(0,len(state_list) * self.eps, len(state_list))
             fig, ax = plt.subplots(2,1, sharex = True)
             lines1 = ax[0].plot(t, np.array(state_list)[:,self.ih],'b--', label = 'h_hidden')
             lines2 = ax[0].plot(t, np.array(state_list)[:,self.ix],'g', label = 'x_input')
@@ -275,7 +275,7 @@ class Target_MNIST(object):
         batch_idx, (data, target) = next(enumerate(loader))
 
         """ Convert the dataset "data" and "target" variables to s and d """
-        data, target = data.to(device), target.to(device)
+        data, target = data.to(self.device), target.to(self.device)
         x_data = data.reshape([batch_size, 28*28]) # Flatten
         y_target = torch.zeros([batch_size, 10])
         for n in range(batch_size):
@@ -329,11 +329,11 @@ class LinearMatrixDataset(Dataset):
     def __init__(self, input_size, output_size, length = 10000):
         self.input_size = input_size
         self.output_size = output_size
-        self.T = torch.rand((output_size, input_size), dtype = dtype)/5
+        self.T = torch.rand((output_size, input_size), dtype = self.dtype)/5
         self.length = int(length)
         
     def __getitem__(self, index):
-        x_data = torch.rand((self.input_size, 1), dtype = dtype).squeeze()/5
+        x_data = torch.rand((self.input_size, 1), dtype = self.dtype).squeeze()/5
         y_target = torch.matmul(self.T,x_data).squeeze()
         return (x_data, y_target)
 
