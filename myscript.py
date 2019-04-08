@@ -31,7 +31,7 @@ num_epochs = 1
 layer_sizes = [28*28, 500, 10]
 
 epn = EQP_Network(eps=0.5, total_tau=10, batch_size=batch_size, seed=None, layer_sizes = layer_sizes, device = device)
-W, W_mask = epn.initialize_weight_matrix(layer_sizes, seed = seed, kind = 'sparse',
+W, W_mask = epn.initialize_weight_matrix(layer_sizes, seed = seed, kind = 'layered',
                             symmetric = True, density = 0.75)
 epn.randomize_initial_state(batch_size = batch_size)
 
