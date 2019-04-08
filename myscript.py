@@ -1,7 +1,24 @@
 
 #%% Thing
 
+import numpy as np
+from matplotlib import pyplot as plt
+
+import torch
+
+from eqp.model import EQP_Network
+from eqp.model import LinearMatrixDataset
+from eqp.model import MNISTDataset
+
+from tqdm import tqdm
     
+
+device = torch.device('cuda'); torch.set_default_tensor_type(torch.cuda.FloatTensor)
+torch.set_default_dtype(torch.float)
+dtype = torch.float
+
+
+
 seed = 2
 eps = 0.5
 batch_size = 20
@@ -13,7 +30,7 @@ num_epochs = 1
 #layer_sizes = [50, 150, 50]
 layer_sizes = [28*28, 500, 10]
 
-epn = EP_Network(eps=0.5, total_tau=10, batch_size=batch_size, seed=None, layer_sizes = layer_sizes)
+epn = EQP_Network(eps=0.5, total_tau=10, batch_size=batch_size, seed=None, layer_sizes = layer_sizes, device = device)
 W, W_mask = epn.initialize_weight_matrix(layer_sizes, seed = seed, kind = 'sparse',
                             symmetric = True, density = 0.75)
 epn.randomize_initial_state(batch_size = batch_size)
@@ -55,7 +72,7 @@ num_epochs = 1
 
 layer_sizes = [4, 15, 2]
 
-epn = EP_Network(eps=0.5, total_tau=10, batch_size=batch_size, seed=None, layer_sizes = layer_sizes)
+epn = EQP_Network(eps=0.5, total_tau=10, batch_size=batch_size, seed=None, layer_sizes = layer_sizes, device = device)
 W, W_mask = epn.initialize_weight_matrix(layer_sizes, seed = seed, kind = 'fc',
                             symmetric = True, density = 0.75)
 epn.randomize_initial_state(batch_size = batch_size)
