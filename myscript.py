@@ -12,8 +12,8 @@ from eqp.model import MNISTDataset
 
 from tqdm import tqdm
     
-
-device = torch.device('cuda'); torch.set_default_tensor_type(torch.cuda.FloatTensor)
+# CUDA = uses the GPU
+#device = torch.device('cuda'); torch.set_default_tensor_type(torch.cuda.FloatTensor)
 torch.set_default_dtype(torch.float)
 dtype = torch.float
 

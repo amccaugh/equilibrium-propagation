@@ -1,0 +1,4 @@
+Go to this folder on the command line
+Install this folder on pip locally
+$ pip install -e ./
+Run myscript.py
