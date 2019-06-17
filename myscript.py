@@ -12,8 +12,9 @@ from eqp.model import MNISTDataset
 
 from tqdm import tqdm
     
-# CUDA = uses the GPU
-#device = torch.device('cuda'); torch.set_default_tensor_type(torch.cuda.FloatTensor)
+
+#device = torch.device('cuda'); torch.set_default_tensor_type(torch.cuda.FloatTensor) # CUDA = uses the GPU
+device = None #  Use the CPU instead
 torch.set_default_dtype(torch.float)
 dtype = torch.float
 
@@ -27,21 +28,21 @@ total_tau = 10
 learning_rate = 1e-2
 num_epochs = 1
 
-#layer_sizes = [50, 150, 50]
-layer_sizes = [28*28, 500, 10]
+layer_sizes = [10, 15, 4]
+#layer_sizes = [28*28, 500, 10]
 
 epn = EQP_Network(eps=0.5, total_tau=10, batch_size=batch_size, seed=None, layer_sizes = layer_sizes, device = device)
 W, W_mask = epn.initialize_weight_matrix(layer_sizes, seed = seed, kind = 'layered',
                             symmetric = True, density = 0.75)
 epn.randomize_initial_state(batch_size = batch_size)
 
-dataset = MNISTDataset()
-#dataset = LinearMatrixDataset(input_size = epn.layer_sizes[0], output_size = epn.layer_sizes[-1], length = 100000)
+#dataset = MNISTDataset()
+dataset = LinearMatrixDataset(input_size = epn.layer_sizes[0], output_size = epn.layer_sizes[-1], length = 100000)
 dataloader = torch.utils.data.DataLoader(dataset = dataset, batch_size=batch_size, shuffle=True)
 
 
+# Test script starts here
 costs = []
-
 error = []
 for epoch in tqdm(range(num_epochs)):
     for batch_idx, (x_data, y_target) in enumerate(dataloader):

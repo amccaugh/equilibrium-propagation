@@ -329,11 +329,11 @@ class LinearMatrixDataset(Dataset):
     def __init__(self, input_size, output_size, length = 10000):
         self.input_size = input_size
         self.output_size = output_size
-        self.T = torch.rand((output_size, input_size), dtype = self.dtype)/5
+        self.T = torch.rand((output_size, input_size), dtype = torch.float)/5
         self.length = int(length)
         
     def __getitem__(self, index):
-        x_data = torch.rand((self.input_size, 1), dtype = self.dtype).squeeze()/5
+        x_data = torch.rand((self.input_size, 1), dtype = torch.float).squeeze()/5
         y_target = torch.matmul(self.T,x_data).squeeze()
         return (x_data, y_target)
 
