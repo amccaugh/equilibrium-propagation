@@ -12,6 +12,7 @@ from torchvision import datasets, transforms
 from torch.utils.data.dataset import Dataset
 import os
 
+
 #device = torch.device('cpu'); torch.set_default_tensor_type(torch.FloatTensor)
 
 
@@ -44,7 +45,7 @@ def rhoprime(s):
 
 class EQP_Network(object):
     
-    def __init__(self, eps = 0.5, total_tau = 10, batch_size = 20, seed = None, layer_sizes = [28*28, 500, 10], device = None, dtype = torch.float):
+    def __init__(self, eps = 0.5, total_tau = [10,2], batch_size = 20, seed = None, layer_sizes = [28*28, 500, 10], device = None, dtype = torch.float):
         if seed is not None:
             torch.manual_seed(seed = seed)
             np.random.seed(seed = seed)
@@ -55,6 +56,8 @@ class EQP_Network(object):
         self.batch_size = batch_size
         self.eps = eps
         self.total_tau = total_tau
+        self.device = device
+        self.dtype = dtype
 
         # Set up indices of neurons for easy access later
         self.ix = slice(0, self.layer_indices[1])
@@ -63,25 +66,31 @@ class EQP_Network(object):
         self.ihy = slice(self.layer_indices[1], self.layer_indices[-1])
 
         # Create masks for state, because updating slices of a matrix is slow
-        self.mx = torch.zeros([1, self.num_neurons])
-        self.my = torch.zeros([1, self.num_neurons])
-        self.mh = torch.zeros([1, self.num_neurons])
-        self.mhy = torch.zeros([1, self.num_neurons])
+        self.mx = torch.zeros([1, self.num_neurons]).to(self.device)
+        self.my = torch.zeros([1, self.num_neurons]).to(self.device)
+        self.mh = torch.zeros([1, self.num_neurons]).to(self.device)
+        self.mhy = torch.zeros([1, self.num_neurons]).to(self.device)
         self.mx[:,self.ix] = 1
         self.my[:,self.iy] = 1
         self.mh[:,self.ih] = 1
         self.mhy[:,self.ihy] = 1
-
-        self.device = device
-        self.dtype = dtype
+        
+        self.s = torch.rand(self.batch_size, self.num_neurons).to(self.device)
+        
+    def initialize_persistant_particles(self, n_train):
+        self.persistant_particles = []
+        for i in range(n_train):
+            self.persistant_particles.append(torch.rand(1,self.num_neurons).to(self.device))
 
     def initialize_weight_matrix(self, layer_sizes, seed = None, kind = 'layered', symmetric = True,
-                                 density = 0.5, # Value from 0 to 1, used for 'smallworld' and 'sparse' connectivity
+                                 density = 0.5, num_swconn=400 # Value from 0 to 1, used for 'smallworld' and 'sparse' connectivity
                                  ):
-        W = np.zeros([self.num_neurons,self.num_neurons], dtype = np.float)
-        W_mask = np.zeros(W.shape, dtype = np.int32)
+        #W = np.random.randn(self.num_neurons, self.num_neurons)
+        W = np.zeros([self.num_neurons, self.num_neurons], dtype=np.float32)
+        W_mask = np.zeros([self.num_neurons,self.num_neurons], dtype = np.int32)
         if kind == 'layered':
             # Initialize weights matrix, connecting one layer to the next
+            W = np.zeros([self.num_neurons,self.num_neurons], dtype = np.float)
             for n in range(len(self.layer_sizes)-1): # Make weights only exist from one layer to the next
                 wll = np.random.randn(self.layer_sizes[n+1],self.layer_sizes[n]) # The weight matrix for one layer to the next
                 wll2 = np.random.randn(self.layer_sizes[n],self.layer_sizes[n+1]) # The weight matrix for the reverse
@@ -96,41 +105,81 @@ class EQP_Network(object):
                 W[j:j+dj, i:i+di] = wll2
                 W_mask[i:i+di, j:j+dj] = wll*0 + 1
                 W_mask[j:j+dj, i:i+di] = wll2*0 + 1
+            W_mask[self.iy,self.ix] *= 0
+            W_mask[self.ix,self.iy] *= 0
         elif kind == 'fc':
             # Create a fully-connected weight matrix
             W = np.random.randn(self.num_neurons,self.num_neurons) # The weight matrix for one layer to the next
             W *= np.sqrt(2/(self.num_neurons))
             W_mask += 1
-        elif kind == 'smallworld':
-            # Create a small-world-connectivity matrix
-            pass
+        elif kind=='smallworld':
+            W = np.random.randn(self.num_neurons,self.num_neurons)
+            self.interlayer_connections = []
+            
+            # create connections between adjacent layers
+            i,j = 0,0
+            for n in range(len(self.layer_sizes)-1):
+                i += layer_sizes[n]
+                dj = self.layer_sizes[n]
+                di = self.layer_sizes[n+1]
+                W_mask[i:i+di,j:j+dj] = 1
+                # create masks for selection of weight correction to single layer
+                conn = np.zeros((self.num_neurons,self.num_neurons))
+                conn[i:i+di, j:j+dj] = 1
+                conn[j:j+dj, i:i+di] = 1
+                conn = np.tril(conn)
+                conn /= np.sqrt(np.count_nonzero(conn)) # scale down so that ||W*conn|| gives RMS element value
+                self.interlayer_connections.append(conn)
+                j += layer_sizes[n]
+            self.interlayer_connections = [torch.from_numpy(conn).float().to(self.device)\
+                            .unsqueeze(0) for conn in self.interlayer_connections]
+            """
+            # create connections within layers
+            i = 0
+            for n in range(len(self.layer_sizes)):
+                W_mask[i:i+layer_sizes[n],i:i+layer_sizes[n]] = 1
+                i += layer_sizes[n]
+            """
+            # create random bypass connections    
+            for conn in range(num_swconn):
+                e = np.random.randint(0,self.num_neurons**2-np.count_nonzero(np.tril(W_mask,k=-1))\
+                                      -.5*(self.num_neurons**2+self.num_neurons))
+                k = 0
+                i,j = -1,0
+                while k<e:
+                    i += 1
+                    if i>=self.num_neurons:
+                        i = 0
+                        j += 1
+                    if W_mask[i,j]==0 and i>j:
+                        k += 1
+                W_mask[i,j] = 1
+            # remove connections within input and output layers    
+            W_mask[:layer_sizes[0],:layer_sizes[0]] = 0
+            W_mask[-layer_sizes[-1]:,-layer_sizes[-1]:] = 0
+            W *= np.sqrt(2/(W_mask[W_mask>0].size))*W_mask
+            
         elif kind == 'sparse':
             # Creates random connections.  If symmetric=False, most connections will
             # be simplex, not duplex.  Uses density parameter
             W_mask = np.random.binomial(n = 1, p = density, size = W.shape)
             W = np.random.randn(self.num_neurons,self.num_neurons)*W_mask # The weight matrix for one layer to the next
-        
         if symmetric == True:
             W = np.tril(W) + np.tril(W, k = -1).T
+            W_mask = np.tril(W_mask, k=-1) + np.tril(W_mask, k=-1).T
         # Make sure trace elements are zero so neurons don't self-reference
         W -= np.eye(self.num_neurons, dtype = np.float)*W
         W_mask -= np.eye(self.num_neurons, dtype = np.int32)*W_mask
         # Disconnect input and output neurons
-        W_mask[self.iy,self.ix] *= 0
-        W_mask[self.ix,self.iy] *= 0
         W *= W_mask
         # Convert to Tensor format on the correct device (CPU/GPU)
         W = torch.from_numpy(W).float().to(self.device) # Convert to float Tensor
         W_mask = torch.from_numpy(W_mask).float().to(self.device) # .byte() is the closest thing to a boolean tensor pytorch has
+        #self.interlayer_connections = [torch.from_numpy(m).float().to(self.device) for m in self.interlayer_connections]
          # Line up dimensions so that the zeroth dimension is the batch #
         self.W = W.unsqueeze(0)
         self.W_mask = W_mask.unsqueeze(0)
         return self.W, self.W_mask
-
-
-    def randomize_initial_state(self, batch_size):
-        self.s = torch.rand(batch_size, self.num_neurons)
-        return self.s
 
     def set_x_state(self, x):
                 # # Setup intitial state s and target d
@@ -194,7 +243,7 @@ class EQP_Network(object):
     def evolve_to_equilbrium(self, y_target, beta,
                              state_list = None, energy_list = None):
         # If state_recorder is passed an (empty) list, it will append each state to it
-        num_steps = int(self.total_tau/self.eps)
+        num_steps = int(self.total_tau[1 if beta else 1]/self.eps)
         for n in range(num_steps):
             self.step(beta = beta, y_target = y_target)
             if state_list is not None: state_list.append(self.s.cpu().numpy().copy())
@@ -228,26 +277,41 @@ class EQP_Network(object):
         # whether the connection / weight between i and j exists
         term1 = torch.unsqueeze(rho(s_clamped_phase),dim = 2) @ torch.unsqueeze(rho(s_clamped_phase),dim = 1) # This also works instead of einsum
         term2 = torch.unsqueeze(rho(s_free_phase), dim = 2) @ torch.unsqueeze(rho(s_free_phase), dim = 1) # This also works instead of einsum
-        dW = 1/beta*(term1 - term2)
+        dW = (1/beta)*(term1 - term2)
         dW *= self.W_mask
         return dW
 
-
-    def train_batch(self, x_data, y_target, beta, learning_rate):
-        # Perform free phase evolution
+    def train_batch(self, x_data, y_target, beta, learning_rate, state_indices):
+        # Perform free phase evolution 
+         
+        #initial_state = [self.persistant_particles[i] for i in state_indices]
+        #initial_state = torch.stack(initial_state,dim=0).squeeze()
+        #self.s = initial_state.clone()
         self.set_x_state(x_data)
         self.evolve_to_equilbrium(y_target = None, beta = 0)
         s_free_phase = self.s.clone()
+        #final_state = s_free_phase.clone()
+        #torch.split(final_state,self.batch_size,dim=0)
+        #for i in range(len(final_state)):
+        #    self.persistant_particles[state_indices[i]] = final_state[i].clone()
         
         # Perform weakly-clamped phase evolution
+        #if np.random.randint(0,2): # Randomize sign of beta.
+            # 'We find that it helps regularize the network if we choose the sign of β at random in the second phase'
+        #    beta *= -1
         self.set_x_state(x_data)
-        self.evolve_to_equilbrium(y_target = y_target, beta = 1)
+        self.evolve_to_equilbrium(y_target = y_target, beta = beta)
         s_clamped_phase = self.s.clone()
         
         # Update weights
         dW = self._calculate_weight_update(beta, s_free_phase, s_clamped_phase)
-        self.W += torch.mean(dW, dim = 0)*learning_rate
-        # return s,W
+        dW = torch.mean(dW,dim=0).unsqueeze(0)
+        dW_norm = torch.zeros(dW.size()).to(self.device)
+        for lr,conn in zip(learning_rate,self.interlayer_connections):
+            conn[conn!=0] = 1
+            dW_norm += dW*conn*.5#lr
+        dW_norm = torch.tril(dW_norm,diagonal=-1)+torch.transpose(torch.tril(dW_norm,diagonal=-1),1,2)
+        self.W += .1*dW#_norm
 
 
 class Target_MNIST(object):
@@ -264,6 +328,7 @@ class Target_MNIST(object):
                                transforms.ToTensor(),
         #                       transforms.Normalize((0.5,), (0.3081,))
                            ]))
+        self.device = None
 
     def generate_inputs_and_targets(self, batch_size, train = True):
         """ Returns input data x of size x, and an output target state """
@@ -326,15 +391,17 @@ class MNISTDataset(Dataset):
 
 
 class LinearMatrixDataset(Dataset):
-    def __init__(self, input_size, output_size, length = 10000):
+    def __init__(self, input_size, output_size, length = 10000, noise=0):
         self.input_size = input_size
         self.output_size = output_size
         self.T = torch.rand((output_size, input_size), dtype = torch.float)/5
         self.length = int(length)
+        self.noise = noise
         
     def __getitem__(self, index):
         x_data = torch.rand((self.input_size, 1), dtype = torch.float).squeeze()/5
         y_target = torch.matmul(self.T,x_data).squeeze()
+        y_target += torch.randn(y_target.size())*self.noise*.5*torch.mean(self.T)
         return (x_data, y_target)
 
     def __len__(self):
@@ -358,7 +425,82 @@ class LinearMatrixDataset(Dataset):
                 break
         error = total_error/num_samples_evaluated/y_target.size()[1]
         return error
+#%%
 
-
-
+class Data:
+    def __init__(self, l_input, l_output, batch_size, n_train=10000, n_test=1000):
+        self.T = torch.rand((l_output,l_input),dtype=torch.float)/5
+        self.n_train = n_train
+        self.n_test = n_test
+        self.l_input = l_input
+        self.batch_size = batch_size
+        self.training_data = []
+        for i in range(int(n_train/batch_size)):
+            inputs = torch.rand(l_input,batch_size)
+            outputs = torch.matmul(self.T,inputs)
+            self.training_data.append((inputs.transpose(0,1),outputs.transpose(0,1)))
+        self.test_data = []
+        for i in range(int(n_test/batch_size)):
+            inputs = torch.rand(l_input,batch_size)
+            outputs = torch.matmul(self.T,inputs)
+            self.test_data.append((inputs.transpose(0,1),outputs.transpose(0,1)))
+        self.train_index = 0
+        self.test_index = 0
+    def get_training_batch(self):
+        rv = self.training_data[self.train_index]
+        self.train_index = int((self.train_index+1)%(self.n_train/self.batch_size))
+        if self.train_index==0:
+            np.random.shuffle(self.training_data)
+        return rv
+    def get_test_batch(self):
+        rv = self.test_data[self.test_index]
+        self.test_index = int((self.test_index+1)%(self.n_test/self.batch_size))
+        if self.test_index==0:
+            np.random.shuffle(self.test_data)
+        return rv
     
+class MNIST_Data:
+    def __init__(self, batch_size, device):
+        self.n_train = 60000
+        self.n_test = 10000
+        dataset = Target_MNIST()
+        self.batch_size = batch_size
+        self.training_examples = []
+        self.testing_examples = []
+        self.training_batches = []
+        self.testing_batches = []
+        for example in range(self.n_train):
+            self.training_examples.append([[e.to(device) for e in dataset.generate_inputs_and_targets(1,True)],example])
+        for example in range(self.n_test):
+            self.testing_examples.append([[e.to(device) for e in dataset.generate_inputs_and_targets(1,False)],example])
+        self.training_index = 0
+        self.test_index = 0
+        self._shuffle_training_set()
+        self._shuffle_testing_set()
+    def _shuffle_training_set(self):
+        np.random.shuffle(self.training_examples)
+        self.training_batches = []
+        for i in range(int(self.n_train/self.batch_size)):
+            self.training_batches.append([[torch.stack([s[0][0].squeeze() for s in self.training_examples[self.batch_size*i:self.batch_size*(i+1)]],dim=0),
+                                          torch.stack([s[0][1].squeeze() for s in self.training_examples[self.batch_size*i:self.batch_size*(i+1)]],dim=0)],
+                                          [s[1] for s in self.training_examples[self.batch_size*i:self.batch_size*(i+1)]]])
+    def _shuffle_testing_set(self):
+        np.random.shuffle(self.testing_examples)
+        self.testing_batches = []
+        for i in range(int(self.n_test/self.batch_size)):
+            self.testing_batches.append([[torch.stack([s[0][0].squeeze() for s in self.testing_examples[self.batch_size*i:self.batch_size*(i+1)]],dim=0),
+                                          torch.stack([s[0][1].squeeze() for s in self.testing_examples[self.batch_size*i:self.batch_size*(i+1)]],dim=0)],
+                                          [s[1] for s in self.testing_examples[self.batch_size*i:self.batch_size*(i+1)]]])
+    def get_training_batch(self):
+        rv = self.training_batches[self.training_index]
+        self.training_index = (self.training_index+1)%int(self.n_train/self.batch_size)
+        if self.training_index==0:
+            self._shuffle_training_set()
+        return rv
+    def get_test_batch(self):
+        rv = self.testing_batches[self.test_index]
+        self.test_index = (self.test_index+1)%int(self.n_test/self.batch_size)
+        if self.test_index==0:
+            self._shuffle_testing_set()
+        return rv
+            
