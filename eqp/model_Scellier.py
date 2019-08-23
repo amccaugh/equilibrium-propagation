@@ -25,6 +25,7 @@ class EQP_Network:
             torch.manual_seed(seed=seed)
             np.random.seed(seed=seed)
         
+        self.seed = seed
         self.layer_sizes = layer_sizes
         self.layer_indices = np.cumsum([0] + self.layer_sizes)
         self.num_neurons = sum(self.layer_sizes)
@@ -45,11 +46,11 @@ class EQP_Network:
     def initialize_persistant_particles(self, n_train=60000):
         self.persistant_particles = []
         for i in range(int(n_train/self.batch_size)):
-            self.persistant_particles.append(torch.rand(self.s.shape).to(self.device))
+            self.persistant_particles.append(torch.zeros(self.s.shape).to(self.device))
         
     def initialize_weight_matrix(self, kind='Layered', symmetric=True):
         # initialize weight and mask to represent interlayer connection strengths
-        W = np.random.randn(self.num_neurons,self.num_neurons)
+        W = np.zeros((self.num_neurons,self.num_neurons),dtype=np.float32)
         W_mask = np.zeros((self.num_neurons,self.num_neurons),dtype=np.float32)
         # initialize masks to retrieve connection between two layers
         interlayer_connections = []
@@ -67,9 +68,15 @@ class EQP_Network:
             # Make W and W_mask symmetrical with zeros on diagonal
             W = np.tril(W,k=-1)+np.tril(W,k=-1).T
             W_mask = np.tril(W_mask,k=-1)+np.tril(W_mask,k=-1).T
-            
+            # Glorot-Bengoi weight initialization, as in Scellier code
+        for conn, n_in, n_out in zip(interlayer_connections, self.layer_sizes[:-1], self.layer_sizes[1:]):
+            rng = np.random.RandomState(seed=self.seed)
+            W += conn*np.asarray(
+                    rng.uniform(
+                            low=-np.sqrt(6. / (n_in+n_out)),
+                            high=np.sqrt(6. / (n_in+n_out)),
+                            size=W.shape))
         # Convert numpy tensors to pytorch tensors
-        W *= np.sqrt(2/np.count_nonzero(W_mask))*W_mask
         self.W = torch.from_numpy(W).float().to(self.device).unsqueeze(0)
         self.W_mask = torch.from_numpy(W_mask).float().to(self.device).unsqueeze(0)
         self.interlayer_connections = [torch.from_numpy(conn).float().to(self.device).unsqueeze(0)\
@@ -213,12 +220,10 @@ class MNIST_Wrapper:
     def get_training_batch(self):
         rv = self.training_batches[self.training_index]
         self.training_index = (self.training_index+1)%int(self.n_train/self.batch_size)
-        if self.training_index==0:
-            np.random.shuffle(self.training_batches)
+        #if self.training_index==0:
+        #    np.random.shuffle(self.training_batches)
         return rv
     def get_test_batch(self):
         rv = self.test_batches[self.test_index]
         self.test_index = (self.test_index+1)%int(self.n_test/self.batch_size)
-        if self.test_index==0:
-            np.random.shuffle(self.test_batches)
         return rv
