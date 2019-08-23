@@ -43,11 +43,11 @@ class EQP_Network:
         
     def initialize_state(self):
         # initialize state matrix
-        self.s = torch.rand(self.batch_size, self.num_neurons).to(self.device)
+        self.s = torch.zeros(self.batch_size, self.num_neurons).to(self.device)
         
-    def initialize_persistant_particles(self, n_train=60000):
+    def initialize_persistant_particles(self, n_particles=60000):
         self.persistant_particles = []
-        for i in range(int(n_train/self.batch_size)):
+        for i in range(int(n_particles/self.batch_size)):
             self.persistant_particles.append(torch.zeros(self.s.shape).to(self.device))
         
     def initialize_weight_matrix(self, kind='Layered', symmetric=True):
@@ -66,11 +66,7 @@ class EQP_Network:
             # No intralayer connections
             for conn in interlayer_connections:
                 W_mask += conn
-        if symmetric==True:
-            # Make W and W_mask symmetrical with zeros on diagonal
-            W = np.tril(W,k=-1)+np.tril(W,k=-1).T
-            W_mask = np.tril(W_mask,k=-1)+np.tril(W_mask,k=-1).T
-            # Glorot-Bengoi weight initialization, as in Scellier code
+        # Glorot-Bengoi weight initialization, as in Scellier code
         for conn, n_in, n_out in zip(interlayer_connections, self.layer_sizes[:-1], self.layer_sizes[1:]):
             rng = np.random.RandomState(seed=self.seed)
             W += conn*np.asarray(
@@ -78,6 +74,10 @@ class EQP_Network:
                             low=-np.sqrt(6. / (n_in+n_out)),
                             high=np.sqrt(6. / (n_in+n_out)),
                             size=W.shape))
+        if symmetric==True:
+        # Make W and W_mask symmetrical with zeros on diagonal
+            W = np.tril(W,k=-1)+np.tril(W,k=-1).T
+            W_mask = np.tril(W_mask,k=-1)+np.tril(W_mask,k=-1).T
         # Convert numpy tensors to pytorch tensors
         self.W = torch.from_numpy(W).float().to(self.device).unsqueeze(0)
         self.W_mask = torch.from_numpy(W_mask).float().to(self.device).unsqueeze(0)
