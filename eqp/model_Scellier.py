@@ -5,6 +5,8 @@ import torch
 from torchvision import datasets, transforms
 from torch.utils.data.dataset import Dataset
 import os
+import gzip
+import pickle
 
 def rho(s):
     # Neuron activation function.
@@ -147,6 +149,7 @@ class EQP_Network:
         self.set_x_state(x)
         self.evolve_to_equilibrium(None,0)
         s_free_phase = self.s.clone()
+        training_error = torch.eq(torch.argmax(self.s[:,self.iy],dim=1),torch.argmax(y,dim=1)).sum()
         # save state to initialize next time this batch is encountered
         self.persistant_particles[index] = self.s.clone()
         self.set_x_state(x)
@@ -168,7 +171,9 @@ class EQP_Network:
         for lr, i, j in zip(learning_rate, self.layer_indices[1:-1], self.layer_indices[2:]):
             dB[i:j] *= lr
         self.B += dB
+        return training_error
         
+"""
 class Target_MNIST(object):
     def __init__(self):
         # Setup MNIST data loader
@@ -185,7 +190,7 @@ class Target_MNIST(object):
                            ]))
 
     def generate_inputs_and_targets(self, batch_size, train = True):
-        """ Returns input data x of size x, and an output target state """
+        #Returns input data x of size x, and an output target state 
         if train:
             dataset = self.train_dataset
         else:
@@ -193,7 +198,7 @@ class Target_MNIST(object):
         loader = torch.utils.data.DataLoader(dataset = dataset, batch_size=batch_size, shuffle=True)
         batch_idx, (data, target) = next(enumerate(loader))
 
-        """ Convert the dataset "data" and "target" variables to s and d """
+        #Convert the dataset "data" and "target" variables to s and d
         x_data = data.reshape([batch_size, 28*28]) # Flatten
         y_target = torch.zeros([batch_size, 10])
         for n in range(batch_size):
@@ -227,3 +232,63 @@ class MNIST_Wrapper:
         rv = self.test_batches[self.test_index]
         self.test_index = (self.test_index+1)%int(self.n_test/self.batch_size)
         return rv
+"""
+
+class MNIST_Scellier:
+    def __init__(self, batch_size, device):
+        path = r'/home/qittlab/Desktop/jimmy/equilibrium-propagation/mnist.pkl.gz'
+            
+        f = gzip.open(path, 'rb')
+        (x_train,y_train), (x_validate,y_validate), (x_test, y_test) = pickle.load(f, encoding='latin1')
+        f.close()
+        
+        x = list(x_train)+list(x_validate)+list(x_test)
+        y = list(y_train)+list(y_validate)+list(y_test)
+        for i, yy in zip(range(len(y)),y):
+            v = np.zeros((1,10))
+            v[0][yy] = 1
+            y[i] = v
+        x = [torch.from_numpy(xx).squeeze().to(device) for xx in x]
+        y = [torch.from_numpy(yy).squeeze().to(device) for yy in y]
+        
+        self.n_batch_train = int(50000/batch_size)
+        self.n_batch_test = int(10000/batch_size)
+        self.training_batches = []
+        self.test_batches = []
+        self.training_index = 0
+        self.test_index = 0
+        
+        for batch in range(self.n_batch_train):
+            self.training_batches.append(
+                     [[torch.stack(x[batch_size*batch:batch_size*(batch+1)],dim=0).float(),
+                      torch.stack(y[batch_size*batch:batch_size*(batch+1)],dim=0).float()],
+                      batch])
+        for batch in range(self.n_batch_train,self.n_batch_train+self.n_batch_test):
+            self.test_batches.append(
+                    [[torch.stack(x[batch_size*batch:batch_size*(batch+1)],dim=0).float(),
+                      torch.stack(y[batch_size*batch:batch_size*(batch+1)],dim=0).float()],
+                      batch])
+        
+    def get_training_batch(self):
+        rv = self.training_batches[self.training_index]
+        self.training_index = (self.training_index+1)%(self.n_batch_train)
+        return rv
+    def get_test_batch(self):
+        rv = self.test_batches[self.test_index]
+        self.test_index = (self.test_index+1)%(self.n_batch_test)
+        return rv
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
