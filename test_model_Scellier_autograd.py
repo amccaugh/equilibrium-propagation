@@ -6,8 +6,8 @@ dataset = MNIST_Scellier(1,'cpu')
 #%%
 import torch
 import numpy as np
-from eqp.model_Scellier import EQP_Network
-from eqp.model_Scellier import MNIST_Scellier
+from eqp.model_Scellier_autograd import EQP_Network
+from eqp.model_Scellier_autograd import MNIST_Scellier
 import datetime
 import pickle
 
@@ -29,21 +29,23 @@ Error = {'seed': [],
          'training error': [],
          'test error': []}
 
-for seed in [1]:
+for seed in range(1):
     torch.manual_seed(seed=seed)
     np.random.seed(seed=seed)
-    
-    network = EQP_Network(layer_sizes, batch_size, eps, n_iter, seed, device, dtype)
-    network.initialize_state()
-    network.initialize_weight_matrix(kind='Layered',symmetric=True)
-    network.initialize_biases()
-    network.initialize_persistant_particles(n_particles=60000)
     
     n_train_ex = 50000
     n_test_ex = 10000
     n_train = int(n_train_ex/batch_size)
     n_test = int(n_test_ex/batch_size)
     dataset = MNIST_Scellier(batch_size, device, n_train=n_train_ex, n_test=n_test_ex)
+    print('Dataset initialized.')
+    
+    network = EQP_Network(layer_sizes, batch_size, eps, n_iter, seed, device, dtype)
+    network.initialize_state()
+    network.initialize_weight_matrix(kind='Layered',symmetric=True)
+    network.initialize_biases()
+    network.initialize_persistant_particles(n_particles=n_train_ex+n_test_ex)
+    print('Network initialized.')
     """
     training_error = 0
     for i in range(n_train):
@@ -64,8 +66,10 @@ for seed in [1]:
     """
     training_error, test_error = 0,0
     for epoch in range(1,num_epochs+1):
+        print('Beginning epoch %d.'%(epoch))
         training_error = 0
         for i in range(n_train):
+            print('Training batch %d.'%(i))
             [x, y], index = dataset.get_training_batch()
             training_error += network.train_batch(x, y, index, beta, learning_rate)
         """
@@ -76,16 +80,16 @@ for seed in [1]:
             network.evolve_to_equilibrium(y, 0)
             training_error += torch.eq(torch.argmax(network.s[:,network.iy],dim=1),torch.argmax(y,dim=1)).sum()
         """
-    test_error = 0
-    for i in range(n_test):
-        [x, y], index = dataset.get_test_batch()
-        network.use_persistant_particle(index)
-        network.set_x_state(x)
-        network.evolve_to_equilibrium(y, 0)
-        network.set_persistant_particle(index, network.s)
-        test_error += torch.eq(torch.argmax(network.s[:,network.iy],dim=1),torch.argmax(y,dim=1)).sum()
-        #print('Epoch {} complete.\n  Training error: {}\n  Test error: {}'\
-        #      .format(epoch, 1-(float(training_error)/n_train_ex),1-(float(test_error)/n_test_ex)))
+        test_error = 0
+        for i in range(n_test):
+            [x, y], index = dataset.get_test_batch()
+            network.use_persistant_particle(index)
+            network.set_x_state(x)
+            network.evolve_to_equilibrium(y, 0)
+            network.set_persistant_particle(index, network.s)
+            test_error += torch.eq(torch.argmax(network.s[:,network.iy],dim=1),torch.argmax(y,dim=1)).sum()
+        print('Epoch {} complete.\n  Training error: {}\n  Test error: {}'\
+            .format(epoch, 1-(float(training_error)/n_train_ex),1-(float(test_error)/n_test_ex)))
     Error['seed'].append(seed)
     Error['training error'].append(1-(float(training_error)/n_train_ex))
     Error['test error'].append(1-(float(test_error)/n_test_ex))
