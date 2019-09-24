@@ -3,6 +3,83 @@
 from eqp.model_Scellier import MNIST_Scellier
 dataset = MNIST_Scellier(1,'cpu')
 
+
+#%%
+
+#%%
+# Train network with 3 hidden layers
+
+import torch
+import numpy as np
+from eqp.model_Scellier import EQP_Network
+from eqp.model_Scellier import MNIST_Scellier
+import datetime
+import pickle
+import time
+
+np.set_printoptions(precision=2, linewidth=100)
+torch.set_printoptions(precision=2, linewidth=100)
+
+layer_sizes = [784, 500, 500, 500, 10]
+batch_size = 20
+learning_rate = [.128, .032, .008, .002]
+beta = 1
+eps = .5
+n_iter = [500, 8]
+num_epochs = 160
+device='cuda:0'
+dtype=torch.float
+
+Error = {'seed': [],
+         'training error': [],
+         'test error': []}
+
+for seed in [1]:
+    torch.manual_seed(seed=seed)
+    np.random.seed(seed=seed)
+    
+    network = EQP_Network(layer_sizes, batch_size, eps, n_iter, seed, device, dtype)
+    network.initialize_state()
+    network.initialize_weight_matrix(kind='Layered',symmetric=True)
+    network.initialize_biases()
+    network.initialize_persistant_particles(n_particles=60000)
+    
+    n_train_ex = 50000
+    n_test_ex = 10000
+    n_train = int(n_train_ex/batch_size)
+    n_test = int(n_test_ex/batch_size)
+    dataset = MNIST_Scellier(batch_size, device, n_train=n_train_ex, n_test=n_test_ex)
+    training_error, test_error = 0,0
+    for epoch in range(1,num_epochs+1):
+        training_error = 0
+        for i in range(n_train):
+            t_0 = time.time()
+            [x, y], index = dataset.get_training_batch()
+            training_error += network.train_batch(x, y, index, beta, learning_rate)
+            #print('\t%e'%(time.time()-t_0))
+        test_error = 0
+        for i in range(n_test):
+            [x, y], index = dataset.get_test_batch()
+            network.use_persistant_particle(index)
+            network.set_x_state(x)
+            network.evolve_to_equilibrium(y, 0)
+            network.set_persistant_particle(index, network.s)
+            test_error += torch.eq(torch.argmax(network.s[:,network.iy],dim=1),torch.argmax(y,dim=1)).sum()
+        print('Epoch {} complete.\n  Training error: {}\n  Test error: {}'\
+                  .format(epoch, 1-(float(training_error)/n_train_ex),1-(float(test_error)/n_test_ex)))
+        Error['seed'].append(seed)
+        Error['training error'].append(1-(float(training_error)/n_train_ex))
+        Error['test error'].append(1-(float(test_error)/n_test_ex))
+    print('Seed: %d. Final training error: %f. Final test error: %f.'\
+          %(seed,1-(float(training_error)/n_train_ex),1-(float(test_error)/n_test_ex)))
+    
+dt = datetime.datetime.now()
+filename = r'MNIST_{}-{}-{}-{}-{}.pickle'.format(dt.year,dt.month,dt.day,dt.hour,dt.minute)
+pickle.dump(Error, open(filename,'wb'))
+
+
+
+
 #%%
 import torch
 import numpy as np

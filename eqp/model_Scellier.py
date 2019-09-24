@@ -37,6 +37,7 @@ class EQP_Network:
         
         self.ix = slice(0,self.layer_indices[1])
         self.iy = slice(self.layer_indices[-2],self.layer_indices[-1])
+        self.ihy = slice(self.layer_indices[1],self.layer_indices[-1])
         
         self.device = device
         self.dtype = dtype
@@ -48,7 +49,13 @@ class EQP_Network:
     def initialize_persistant_particles(self, n_particles=60000):
         self.persistant_particles = []
         for i in range(int(n_particles/self.batch_size)):
-            self.persistant_particles.append(torch.zeros(self.s.shape).to(self.device))
+            self.persistant_particles.append(torch.zeros(self.s[:,self.ihy].shape).to(self.device))
+            
+    def use_persistant_particle(self, index):
+        self.s[:,self.ihy] = self.persistant_particles[index].clone()
+            
+    def set_persistant_particle(self, index, state):
+        self.persistant_particles[index] = state[:,self.ihy].clone()
         
     def initialize_weight_matrix(self, kind='Layered', symmetric=True):
         # initialize weight and mask to represent interlayer connection strengths
@@ -102,14 +109,14 @@ class EQP_Network:
         rho_s = rho(self.s)
         term2 = torch.matmul(rho_s.unsqueeze(2),rho_s.unsqueeze(1))
         term2 *= self.W
-        term2 = -.5*torch.sum(term2,dim=[1,2])
+        term2 = torch.sum(term2,dim=[1,2])
         term3 = -1*torch.sum(self.B*rho_s,dim=1)
         return term1 + term2 + term3
     
     def C(self, y_target):
         # Sum of squared errors
         y = self.s[:,self.iy]
-        return .5*torch.norm(y-y_target,dim=1)**2
+        return torch.norm(y-y_target,dim=1)**2
     
     def F(self, beta, y_target):
         # Total error
@@ -124,7 +131,7 @@ class EQP_Network:
         self.s += dEds
         if beta != 0:
             dCds = self.eps*beta*(y_target-self.s[:,self.iy])
-            self.s[:,self.iy] += dCds
+            self.s[:,self.iy] += 2*dCds
         torch.clamp(self.s, 0, 1, out=self.s)
 
     def evolve_to_equilibrium(self, y_target, beta):
@@ -140,18 +147,17 @@ class EQP_Network:
 
     def calculate_bias_update(self, beta, s_free_phase, s_clamped_phase):
         dB = (1/beta) * (rho(s_clamped_phase) - rho(s_free_phase))
-        dB[:,self.ix] = 0
-        return dB
+        return -dB
 
     def train_batch(self, x, y, index, beta, learning_rate):
         # initialize state to previously-computed state for this batch
-        self.s = self.persistant_particles[index].clone()
+        self.use_persistant_particle(index)
         self.set_x_state(x)
         self.evolve_to_equilibrium(None,0)
         s_free_phase = self.s.clone()
         training_error = torch.eq(torch.argmax(self.s[:,self.iy],dim=1),torch.argmax(y,dim=1)).sum()
+        self.set_persistant_particle(index, s_free_phase)
         # save state to initialize next time this batch is encountered
-        self.persistant_particles[index] = self.s.clone()
         self.set_x_state(x)
         if np.random.randint(0,2): 
             # randomize sign of beta
@@ -168,9 +174,10 @@ class EQP_Network:
         
         dB = self.calculate_bias_update(beta, s_free_phase, s_clamped_phase)
         dB = torch.mean(dB,dim=0).unsqueeze(0)
+        dB[:,self.ix] = 0
         for lr, i, j in zip(learning_rate, self.layer_indices[1:-1], self.layer_indices[2:]):
             dB[i:j] *= lr
-        self.B += dB
+        #self.B += dB
         return training_error
         
 """
@@ -235,7 +242,7 @@ class MNIST_Wrapper:
 """
 
 class MNIST_Scellier:
-    def __init__(self, batch_size, device):
+    def __init__(self, batch_size, device, n_train=60000, n_test=10000):
         path = r'/home/qittlab/Desktop/jimmy/equilibrium-propagation/mnist.pkl.gz'
             
         f = gzip.open(path, 'rb')
@@ -251,8 +258,8 @@ class MNIST_Scellier:
         x = [torch.from_numpy(xx).squeeze().to(device) for xx in x]
         y = [torch.from_numpy(yy).squeeze().to(device) for yy in y]
         
-        self.n_batch_train = int(50000/batch_size)
-        self.n_batch_test = int(10000/batch_size)
+        self.n_batch_train = int(n_train/batch_size)
+        self.n_batch_test = int(n_test/batch_size)
         self.training_batches = []
         self.test_batches = []
         self.training_index = 0
