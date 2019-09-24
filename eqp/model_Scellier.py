@@ -125,8 +125,8 @@ class EQP_Network:
         return self.E() + beta*self.C(y_target)
     
     def step(self, beta, y_target):
-        Rs = (rho(self.s)@self.W).squeeze() + self.B
-        dEds = self.eps*(rhoprime(self.s, self.device)*Rs-self.s)
+        Rs = (rho(self.s)@self.W).squeeze()
+        dEds = self.eps*(Rs+self.B-rho(self.s))
         dEds[:,self.ix] = 0
         self.s += dEds
         if beta != 0:
@@ -147,7 +147,7 @@ class EQP_Network:
 
     def calculate_bias_update(self, beta, s_free_phase, s_clamped_phase):
         dB = (1/beta) * (rho(s_clamped_phase) - rho(s_free_phase))
-        return -dB
+        return dB
 
     def train_batch(self, x, y, index, beta, learning_rate):
         # initialize state to previously-computed state for this batch
