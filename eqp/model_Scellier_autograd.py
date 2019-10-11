@@ -57,16 +57,14 @@ class EQP_Network:
     def set_persistant_particle(self, index, state):
         self.persistant_particles[index] = state[:,self.ihy].clone()
         
-    def initialize_weight_matrix(self, kind='Layered', symmetric=True, num_swconn=0):
+    def initialize_weight_matrix(self, kind='Layered', symmetric=True):
         # initialize weight and mask to represent interlayer connection strengths
-        self.num_swconn = num_swconn
-        self.rng = np.random.RandomState(seed=self.seed)
         W = np.zeros((self.num_neurons,self.num_neurons),dtype=np.float32)
         W_mask = np.zeros((self.num_neurons,self.num_neurons),dtype=np.float32)
         # initialize masks to retrieve connection between two layers
         interlayer_connections = []
         for i,j,k in zip(self.layer_indices[:-2],self.layer_indices[1:-1],self.layer_indices[2:]):
-            conn = np.zeros(W.shape,dtype=np.int32)
+            conn = np.zeros(W.shape,dtype=np.float32)
             conn[i:j,j:k] = 1
             conn[j:k,i:j] = 1
             interlayer_connections.append(conn)
@@ -75,34 +73,14 @@ class EQP_Network:
             # No intralayer connections
             for conn in interlayer_connections:
                 W_mask += conn
-        elif kind=='smallworld':
-            self.potential_conn_indices = []
-            for layer_r,r in zip(self.layer_indices[2:-1],range(len(self.layer_indices[2:-1]))):
-                for i in range(layer_r,self.layer_indices[-1]):
-                    for j in range(self.layer_indices[r+1]):
-                        self.potential_conn_indices.append((i,j))
-            for sw_conn in range(num_swconn):
-                location_index = np.random.randint(len(self.potential_conn_indices))
-                W_mask[self.potential_conn_indices[location_index]] = 1
-                del self.potential_conn_indices[location_index]
-            for i,j in zip(self.layer_indices[1:-2],self.layer_indices[2:-1]):
-                W_mask[i:j,i:j] = 1
-            for conn in interlayer_connections:
-                W_mask += conn        
-            if num_swconn!=0:
-                W += np.asarray(
-                    self.rng.uniform(
-                            low=-np.sqrt(3. / num_swconn),
-                            high=np.sqrt(3. / num_swconn),
-                            size=W.shape))
         # Glorot-Bengoi weight initialization, as in Scellier code
         for conn, n_in, n_out in zip(interlayer_connections, self.layer_sizes[:-1], self.layer_sizes[1:]):
-            W[conn] = conn*np.asarray(
-                    self.rng.uniform(
+            rng = np.random.RandomState(seed=self.seed)
+            W += conn*np.asarray(
+                    rng.uniform(
                             low=-np.sqrt(6. / (n_in+n_out)),
                             high=np.sqrt(6. / (n_in+n_out)),
                             size=W.shape))
-        W *= W_mask
         if symmetric==True:
         # Make W and W_mask symmetrical with zeros on diagonal
             W = np.tril(W,k=-1)+np.tril(W,k=-1).T
@@ -112,16 +90,6 @@ class EQP_Network:
         self.W_mask = torch.from_numpy(W_mask).float().to(self.device).unsqueeze(0)
         self.interlayer_connections = [torch.from_numpy(conn).float().to(self.device).unsqueeze(0)\
                                        for conn in interlayer_connections]
-        
-    def add_sw_conn(self):
-        assert len(self.potential_conn_indices)>0
-        self.num_swconn += 1
-        location_index = np.random.randint(len(self.potential_conn_indices))
-        self.W_mask[self.potential_conn_indices[location_index]] = 1
-        self.W[self.potential_conn_indices[location_index]] = self.rng.uniform(
-                low=-np.sqrt(3./self.num_swconn),
-                high=np.sqrt(3./self.num_swconn))
-        del self.potential_conn_indices[location_index]
 
     def initialize_biases(self):
         # initialize bias matrix
@@ -140,15 +108,15 @@ class EQP_Network:
         term1 = .5*torch.sum(self.s*self.s,dim=1)
         rho_s = rho(self.s)
         term2 = torch.matmul(rho_s.unsqueeze(2),rho_s.unsqueeze(1))
-        term2 *= self.W
-        term2 = torch.sum(term2,dim=[1,2])
+        term2 = term2 * self.W
+        term2 = -.5*torch.sum(term2,dim=[1,2])
         term3 = -1*torch.sum(self.B*rho_s,dim=1)
         return term1 + term2 + term3
     
     def C(self, y_target):
         # Sum of squared errors
         y = self.s[:,self.iy]
-        return torch.norm(y-y_target,dim=1)**2
+        return .5*torch.norm(y-y_target,dim=1)**2
     
     def F(self, beta, y_target):
         # Total error
@@ -157,14 +125,14 @@ class EQP_Network:
         return self.E() + beta*self.C(y_target)
     
     def step(self, beta, y_target):
-        Rs = (rho(self.s)@self.W).squeeze()
-        dEds = self.eps*(Rs+self.B-rho(self.s))
-        dEds[:,self.ix] = 0
-        self.s += dEds
+        Rs = (rho(self.s)@self.W).squeeze() + self.B
+        dEds = self.eps*(rhoprime(self.s, self.device)*Rs-self.s)
+        dEds[:,self.ix] = torch.zeros(dEds[:,self.ix].shape)
+        self.s = self.s + dEds
         if beta != 0:
             dCds = self.eps*beta*(y_target-self.s[:,self.iy])
-            self.s[:,self.iy] += 2*dCds
-        torch.clamp(self.s, 0, 1, out=self.s)
+            self.s[:,self.iy] = self.s[:,self.iy] + dCds
+        self.s = torch.clamp(self.s, 0, 1)
 
     def evolve_to_equilibrium(self, y_target, beta):
         for i in range(self.n_iter[1 if beta else 0]):
@@ -179,40 +147,102 @@ class EQP_Network:
 
     def calculate_bias_update(self, beta, s_free_phase, s_clamped_phase):
         dB = (1/beta) * (rho(s_clamped_phase) - rho(s_free_phase))
-        return dB
+        return -dB
 
     def train_batch(self, x, y, index, beta, learning_rate):
         # initialize state to previously-computed state for this batch
         self.use_persistant_particle(index)
         self.set_x_state(x)
+        self.W.requires_grad = True
+        self.B.requires_grad = True
         self.evolve_to_equilibrium(None,0)
-        s_free_phase = self.s.clone()
+        E_free = torch.mean(self.E().clone())
         training_error = torch.eq(torch.argmax(self.s[:,self.iy],dim=1),torch.argmax(y,dim=1)).sum()
-        self.set_persistant_particle(index, s_free_phase)
+        self.set_persistant_particle(index, self.s)
         # save state to initialize next time this batch is encountered
-        self.set_x_state(x)
         if np.random.randint(0,2): 
             # randomize sign of beta
-            beta *= -1
+            beta = beta*-1
         self.evolve_to_equilibrium(y,beta)
-        s_clamped_phase = self.s.clone()
+        E_clamped = torch.mean(self.E().clone())            
+        dW, dB = torch.autograd.grad((E_clamped-E_free), (self.W,self.B), retain_graph=True)
+        self.B.requires_grad = False
+        self.W.requires_grad = False
         
-        dW = self.calculate_weight_update(beta, s_free_phase, s_clamped_phase)
-        dW = torch.mean(dW,dim=0).unsqueeze(0)
+        dW = dW/beta
+        dB = dB/beta
+        
         # implement per-layer learning rates
         for lr, conn in zip(learning_rate, self.interlayer_connections):
-            dW[conn!=0] *= lr
-        self.W += dW
+            dW[conn!=0] = dW[conn!=0]*lr
+        self.W = self.W + dW
         
-        dB = self.calculate_bias_update(beta, s_free_phase, s_clamped_phase)
-        dB = torch.mean(dB,dim=0).unsqueeze(0)
         dB[:,self.ix] = 0
         for lr, i, j in zip(learning_rate, self.layer_indices[1:-1], self.layer_indices[2:]):
-            dB[i:j] *= lr
-        self.B += dB
+            dB[i:j] = dB[i:j]*lr
+        self.B = self.B + dB
         return training_error
-    
-    
+        
+"""
+class Target_MNIST(object):
+    def __init__(self):
+        # Setup MNIST data loader
+        data_path = os.path.realpath('./mnist_data/')
+        self.test_dataset = datasets.MNIST(data_path, train=False, download=True,
+                           transform=transforms.Compose([
+                               transforms.ToTensor(),
+        #                       transforms.Normalize((0.5,), (0.3081,))
+                           ]))
+        self.train_dataset = datasets.MNIST(data_path, train=True, download=True,
+                           transform=transforms.Compose([
+                               transforms.ToTensor(),
+        #                       transforms.Normalize((0.5,), (0.3081,))
+                           ]))
+
+    def generate_inputs_and_targets(self, batch_size, train = True):
+        #Returns input data x of size x, and an output target state 
+        if train:
+            dataset = self.train_dataset
+        else:
+            dataset = self.test_dataset
+        loader = torch.utils.data.DataLoader(dataset = dataset, batch_size=batch_size, shuffle=True)
+        batch_idx, (data, target) = next(enumerate(loader))
+
+        #Convert the dataset "data" and "target" variables to s and d
+        x_data = data.reshape([batch_size, 28*28]) # Flatten
+        y_target = torch.zeros([batch_size, 10])
+        for n in range(batch_size):
+            y_target[n, target[n]] = 1 # Convert to one-hot
+        
+        return x_data, y_target
+
+class MNIST_Wrapper:
+    def __init__(self, batch_size, device, n_train=60000, n_test=10000):
+        self.n_train = n_train
+        self.n_test = n_test
+        self.batch_size = batch_size
+        self.training_batches = []
+        self.test_batches = []
+        self.training_index = 0
+        self.test_index = 0
+        dataset = Target_MNIST()
+        for example in range(int(self.n_train/self.batch_size)):
+            x, y = dataset.generate_inputs_and_targets(self.batch_size,True)
+            self.training_batches.append([[x.to(device),y.to(device)], example])
+        for example in range(int(self.n_test/self.batch_size)):
+            x, y = dataset.generate_inputs_and_targets(self.batch_size,False)
+            self.test_batches.append([x.to(device),y.to(device)])
+    def get_training_batch(self):
+        rv = self.training_batches[self.training_index]
+        self.training_index = (self.training_index+1)%int(self.n_train/self.batch_size)
+        #if self.training_index==0:
+        #    np.random.shuffle(self.training_batches)
+        return rv
+    def get_test_batch(self):
+        rv = self.test_batches[self.test_index]
+        self.test_index = (self.test_index+1)%int(self.n_test/self.batch_size)
+        return rv
+"""
 
 class MNIST_Scellier:
     def __init__(self, batch_size, device, n_train=60000, n_test=10000):
@@ -258,33 +288,17 @@ class MNIST_Scellier:
         self.test_index = (self.test_index+1)%(self.n_batch_test)
         return rv
         
-
         
-class Linear:
-    def __init__(self, batch_size, device, dim_in, dim_out, n_train, n_test, dtype):
-        self.T = torch.rand((dim_out,dim_in), dtype=dtype)/5
-        self.n_batch_train = int(n_train/batch_size)
-        self.n_batch_test = int(n_test/batch_size)
-        self.training_data = []
-        for i in range(self.n_batch_train):
-            inputs = torch.rand(dim_in, batch_size)
-            outputs = torch.matmul(self.T, inputs)
-            self.training_data.append([inputs.transpose(0,1), outputs.transpose(0,1), i])
-        self.test_data = []
-        for i in range(self.n_batch_test):
-            inputs = torch.rand(dim_in, batch_size)
-            outputs = torch.matmul(self.T, inputs)
-            self.test_data.append([inputs.transpose(0,1), outputs.transpose(0,1), i])
-        self.training_index = 0
-        self.test_index = 0
-    def get_training_batch(self):
-        rv = self.training_data[self.training_index]
-        self.training_index = (self.training_index+1)%self.n_batch_train
-        return rv
-    def get_test_batch(self):
-        rv = self.test_data[self.test_index]
-        self.test_index = (self.test_index+1)%self.n_batch_test
-        return rv
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
         
         
         

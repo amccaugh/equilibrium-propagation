@@ -133,13 +133,11 @@ class EQP_Network(object):
                 j += layer_sizes[n]
             self.interlayer_connections = [torch.from_numpy(conn).float().to(self.device)\
                             .unsqueeze(0) for conn in self.interlayer_connections]
-            """
             # create connections within layers
             i = 0
             for n in range(len(self.layer_sizes)):
                 W_mask[i:i+layer_sizes[n],i:i+layer_sizes[n]] = 1
                 i += layer_sizes[n]
-            """
             # create random bypass connections    
             for conn in range(num_swconn):
                 e = np.random.randint(0,self.num_neurons**2-np.count_nonzero(np.tril(W_mask,k=-1))\

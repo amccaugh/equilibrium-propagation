@@ -9,6 +9,23 @@ dataset = MNIST_Scellier(1,'cpu')
 #%%
 # Train network with 3 hidden layers
 
+def getPotentialConn(network_arg, layer_sizes):
+    try:
+        network = network_arg.copy()
+    except:
+        network = network_arg.clone().squeeze()
+        network = network.cpu()
+    n_vertices = network.shape[0]
+    indices = np.cumsum([0]+layer_sizes)
+    for i in range(1, len(indices)):
+        network[indices[i-1]:indices[i], indices[i-1]:indices[i]] = 1
+    potential_conn = .5*(n_vertices**2-np.count_nonzero(network))
+    for i in range(1, len(indices)):
+        network[indices[i-1]:indices[i], indices[i-1]:indices[i]] = 0
+    return int(potential_conn)
+
+
+
 import torch
 import numpy as np
 from eqp.model_Scellier import EQP_Network
@@ -17,61 +34,161 @@ import datetime
 import pickle
 import time
 
+def printTime(t_0, msg='Time taken: ', n_tabs=0, n_nl=0, offset=True):
+    if offset:
+        t = time.time()-t_0
+    else:
+        t = t_0
+    unit = None
+    tabs = ''.join(['\t']*n_tabs)
+    nl = ''.join(['\n']*n_nl)
+    if t<1e-3:
+        unit='us'
+        t *= 1e6
+    elif t<1:
+        unit='ms'
+        t *= 1e3
+    elif t<60:
+        unit = 's'
+    elif t<(60**2):
+        unit = 'm'
+        t /= 60
+    else:
+        unit = 'h'
+        t /= (60**2)
+    print(tabs+msg+('%.01f'%t)+unit+'.'+nl)
+
 np.set_printoptions(precision=2, linewidth=100)
 torch.set_printoptions(precision=2, linewidth=100)
+ # allow Torch and Numpy to print larger arrays on one line, for ease of viewing
 
 layer_sizes = [784, 500, 500, 500, 10]
+ # number of neurons per layer (input, hidden, output)
+  # Scellier test 1: [784,500,10]
+  # Scellier test 2: [784,500,500,10]
+  # Scellier test 3: [784,500,500,500,10]
 batch_size = 20
-learning_rate = [.128, .032, .008, .002]
+ # how many datapoints to consider during each step of gradient descent
+  # 20 in all of Scellier's tests
 beta = 1
+ # clamping factor for weakly-clamped phase
+   # 1.0 in all of Scellier's tests
 eps = .5
-n_iter = [500, 8]
-num_epochs = 160
+ # size of steps in differential equation
+  # 0.5 in all of Scellier's tests
+n_iter = [1000,100]#[500, 8]
+ # number of timesteps in differential equation in free and weakly-clamped phases, respectively
+  # Scellier test 1: [20,4]
+  # Scellier test 2: [100,6]
+  # Scellier test 3: [500,8]
+num_epochs = 50
+ # number of times to train over full dataset
+  # Scellier test 1: 25
+  # Scellier test 2: 60
+  # Scellier test 3: 160
 device='cuda:0'
+ # 'cuda:0' for GPU or 'cpu' for CPU
 dtype=torch.float
+ # datatype for elements of network
+sw_conn = 210368
+ # number of small-world connections that will be present in network
+seed = 0
+ # to be passed to Numpy and Torch; network will behave the same when re-run with same seed
+n_train_ex = 50000
+n_test_ex = 10000
+ # number of datapoints to consider
+  # 50k training examples and 10k testing examples in Scellier's code
 
-Error = {'seed': [],
+Error = {'learning rate': [],
          'training error': [],
          'test error': []}
 
-for seed in [1]:
-    torch.manual_seed(seed=seed)
-    np.random.seed(seed=seed)
-    
-    network = EQP_Network(layer_sizes, batch_size, eps, n_iter, seed, device, dtype)
+torch.manual_seed(seed=seed)
+np.random.seed(seed=seed)
+
+print('Initializing network for first time.')
+t_0 = time.time()
+network = EQP_Network(layer_sizes, batch_size, eps, n_iter, seed, device, dtype)
+ # store hyperparameters in network
+n_train = int(n_train_ex/batch_size)
+n_test = int(n_test_ex/batch_size)
+ # number of batches for which to train/test
+dataset = MNIST_Scellier(batch_size, device, n_train=n_train_ex, n_test=n_test_ex)
+ # initialize MNIST dataset
+network.initialize_weight_matrix(kind='smallworld', symmetric=True, num_swconn=sw_conn)
+ # initialize weight matrices in small-world configuration
+W_init = network.W.clone()
+ # store weight matrix since Numpy random functions take a long time to run
+learning_rates = np.linspace(.01,.26,15)
+ # rates for which to test network performance
+print('\tDone with initialization.')
+printTime(t_0, n_tabs=1, n_nl=1)
+
+print('Calculating untrained error rate.')
+network.initialize_state()
+network.initialize_biases()
+network.initialize_persistant_particles(n_particles=n_train_ex+n_test_ex)
+test_error = 0
+for i in range(n_test):
+    [x, y], index = dataset.get_test_batch()
+    network.use_persistant_particle(index)
+    network.set_x_state(x)
+    network.evolve_to_equilibrium(y, 0)
+    network.set_persistant_particle(index, network.s)
+    test_error += torch.eq(torch.argmax(network.s[:,network.iy],dim=1),torch.argmax(y,dim=1)).sum()
+print(('\tUntrained error rate: %.06f'%(100*(1-(float(test_error)/n_test_ex))))+'%.')
+
+# to do: 24 networks, 50 epochs, around learning rate of .1: np.linspace(.01,.25,24)
+for lr in learning_rates:
+    t_lr = time.time()
+    print('Beginning testing with learning rate of %.04f.'%lr)
+    Error['learning rate'].append(lr)
+    print('\tResetting network:')
+    t_0 = time.time()
     network.initialize_state()
-    network.initialize_weight_matrix(kind='Layered',symmetric=True)
     network.initialize_biases()
-    network.initialize_persistant_particles(n_particles=60000)
-    
-    n_train_ex = 50000
-    n_test_ex = 10000
-    n_train = int(n_train_ex/batch_size)
-    n_test = int(n_test_ex/batch_size)
-    dataset = MNIST_Scellier(batch_size, device, n_train=n_train_ex, n_test=n_test_ex)
+    network.initialize_persistant_particles(n_particles=n_train_ex+n_test_ex)
+    network.W = W_init.clone()
+    print('\t\tDone resetting network.')
+    printTime(t_0, n_tabs=2)
     training_error, test_error = 0,0
+    Error['training error'].append([])
+    Error['test error'].append([])
     for epoch in range(1,num_epochs+1):
+        print('\tEpoch %d:'%epoch)
+        t_0 = time.time()
         training_error = 0
+        t_training_batch_sum = 0
         for i in range(n_train):
-            t_0 = time.time()
+            t_batch = time.time()
             [x, y], index = dataset.get_training_batch()
-            training_error += network.train_batch(x, y, index, beta, learning_rate)
-            #print('\t%e'%(time.time()-t_0))
+            training_error += network.train_batch(x, y, index, beta, [lr]*5)
+            t_training_batch_sum += time.time()-t_batch
+        t_training_batch_sum /= n_train
         test_error = 0
+        t_testing_batch_sum = 0
         for i in range(n_test):
+            t_batch = time.time()
             [x, y], index = dataset.get_test_batch()
             network.use_persistant_particle(index)
             network.set_x_state(x)
             network.evolve_to_equilibrium(y, 0)
             network.set_persistant_particle(index, network.s)
             test_error += torch.eq(torch.argmax(network.s[:,network.iy],dim=1),torch.argmax(y,dim=1)).sum()
-        print('Epoch {} complete.\n  Training error: {}\n  Test error: {}'\
-                  .format(epoch, 1-(float(training_error)/n_train_ex),1-(float(test_error)/n_test_ex)))
-        Error['seed'].append(seed)
-        Error['training error'].append(1-(float(training_error)/n_train_ex))
-        Error['test error'].append(1-(float(test_error)/n_test_ex))
-    print('Seed: %d. Final training error: %f. Final test error: %f.'\
-          %(seed,1-(float(training_error)/n_train_ex),1-(float(test_error)/n_test_ex)))
+            t_testing_batch_sum += time.time()-t_batch
+        t_testing_batch_sum /= n_test
+        print('\t\tDone with epoch %d.'%epoch)
+        printTime(t_0, n_tabs=2)
+        printTime(t_training_batch_sum, msg='Average training batch time: ', n_tabs=2, offset=False)
+        printTime(t_testing_batch_sum, msg='Average testing batch time: ', n_tabs=2, offset=False)
+        print(('\t\tTraining error: %.06f'%(100*(1-(float(training_error)/n_train_ex))))+'%.'+\
+              ('\n\t\tTest error: %.06f'%(100*(1-(float(test_error)/n_test_ex))))+'%.')
+        Error['training error'][-1].append(1-(float(training_error)/n_train_ex))
+        Error['test error'][-1].append(1-(float(test_error)/n_test_ex))
+    print('Done training:')
+    print(('\tFinal training error: %.06f'%(100*(1-(float(training_error)/n_train_ex))))+'%.')
+    print(('\tFinal testing error: %.06f'%(100*(1-(float(test_error)/n_test_ex))))+'%.')
+    printTime(t_lr, msg='Total time: ', n_tabs=1, n_nl=1)
     
 dt = datetime.datetime.now()
 filename = r'MNIST_{}-{}-{}-{}-{}.pickle'.format(dt.year,dt.month,dt.day,dt.hour,dt.minute)
