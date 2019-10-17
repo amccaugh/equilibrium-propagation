@@ -85,8 +85,8 @@ class EQP_Network:
                 location_index = np.random.randint(len(self.potential_conn_indices))
                 W_mask[self.potential_conn_indices[location_index]] = 1
                 del self.potential_conn_indices[location_index]
-            for i,j in zip(self.layer_indices[1:-2],self.layer_indices[2:-1]):
-                W_mask[i:j,i:j] = 1
+            #for i,j in zip(self.layer_indices[1:-2],self.layer_indices[2:-1]):
+            #    W_mask[i:j,i:j] = 1
             for conn in interlayer_connections:
                 W_mask += conn        
             if num_swconn!=0:
@@ -102,6 +102,15 @@ class EQP_Network:
                             low=-np.sqrt(6. / (n_in+n_out)),
                             high=np.sqrt(6. / (n_in+n_out)),
                             size=W.shape))
+        # Test initialization based on Glorot-Bengio paper:
+        r"""
+        for i, n_in in zip(range(len(self.layer_sizes[:-1])), self.layer_sizes[:-1]):
+            for j, n_out in zip(range(1,1+len(self.layer_sizes[1:])), self.layer_sizes[1:]):
+                W[self.layer_indices[i]:self.layer_indices[i+1],self.layer_indices[j]:self.layer_indices[j+1]] = \
+                    self.rng.uniform(
+                            low=-np.sqrt(6. / (n_in+n_out)),
+                            high=np.sqrt(6. / (n_in+n_out)))
+        """
         W *= W_mask
         if symmetric==True:
         # Make W and W_mask symmetrical with zeros on diagonal
@@ -117,8 +126,8 @@ class EQP_Network:
         assert len(self.potential_conn_indices)>0
         self.num_swconn += 1
         location_index = np.random.randint(len(self.potential_conn_indices))
-        self.W_mask[self.potential_conn_indices[location_index]] = 1
-        self.W[self.potential_conn_indices[location_index]] = self.rng.uniform(
+        self.W_mask[0,self.potential_conn_indices[location_index]] = 1
+        self.W[0,self.potential_conn_indices[location_index]] = self.rng.uniform(
                 low=-np.sqrt(3./self.num_swconn),
                 high=np.sqrt(3./self.num_swconn))
         del self.potential_conn_indices[location_index]
@@ -181,6 +190,12 @@ class EQP_Network:
         dB = (1/beta) * (rho(s_clamped_phase) - rho(s_free_phase))
         return dB
 
+    def get_training_magnitudes(self):
+        magnitudes = []
+        for conn in self.interlayer_connections:
+            magnitudes.append(torch.norm(self.dW*conn))
+        return magnitudes
+
     def train_batch(self, x, y, index, beta, learning_rate):
         # initialize state to previously-computed state for this batch
         self.use_persistant_particle(index)
@@ -199,6 +214,7 @@ class EQP_Network:
         
         dW = self.calculate_weight_update(beta, s_free_phase, s_clamped_phase)
         dW = torch.mean(dW,dim=0).unsqueeze(0)
+        self.dW = dW
         # implement per-layer learning rates
         for lr, conn in zip(learning_rate, self.interlayer_connections):
             dW[conn!=0] *= lr
@@ -215,9 +231,8 @@ class EQP_Network:
     
 
 class MNIST_Scellier:
-    def __init__(self, batch_size, device, n_train=60000, n_test=10000):
-        path = r'/home/qittlab/Desktop/jimmy/equilibrium-propagation/mnist.pkl.gz'
-            
+    def __init__(self, batch_size, device, n_train=60000, n_test=10000,
+                 path = r'/home/qittlab/Desktop/jimmy/equilibrium-propagation/mnist.pkl.gz'):
         f = gzip.open(path, 'rb')
         (x_train,y_train), (x_validate,y_validate), (x_test, y_test) = pickle.load(f, encoding='latin1')
         f.close()

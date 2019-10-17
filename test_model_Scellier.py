@@ -70,18 +70,18 @@ layer_sizes = [784, 500, 500, 500, 10]
 batch_size = 20
  # how many datapoints to consider during each step of gradient descent
   # 20 in all of Scellier's tests
-beta = 1
+beta = 1.015
  # clamping factor for weakly-clamped phase
    # 1.0 in all of Scellier's tests
 eps = .5
  # size of steps in differential equation
   # 0.5 in all of Scellier's tests
-n_iter = [1000,100]#[500, 8]
+n_iter = [500, 8]
  # number of timesteps in differential equation in free and weakly-clamped phases, respectively
   # Scellier test 1: [20,4]
   # Scellier test 2: [100,6]
   # Scellier test 3: [500,8]
-num_epochs = 50
+num_epochs = 50#10
  # number of times to train over full dataset
   # Scellier test 1: 25
   # Scellier test 2: 60
@@ -98,10 +98,12 @@ n_train_ex = 50000
 n_test_ex = 10000
  # number of datapoints to consider
   # 50k training examples and 10k testing examples in Scellier's code
+learning_rate = .1
 
-Error = {'learning rate': [],
+Error = {'weight factor': [],
          'training error': [],
-         'test error': []}
+         'test error': [],
+         'layer rates': []}
 
 torch.manual_seed(seed=seed)
 np.random.seed(seed=seed)
@@ -120,6 +122,8 @@ network.initialize_weight_matrix(kind='smallworld', symmetric=True, num_swconn=s
 W_init = network.W.clone()
  # store weight matrix since Numpy random functions take a long time to run
 learning_rates = np.linspace(.01,.26,15)
+betas = [1.015]#np.linspace(.5,1.5,100)
+W_factor = np.linspace(0,10,100)
  # rates for which to test network performance
 print('\tDone with initialization.')
 printTime(t_0, n_tabs=1, n_nl=1)
@@ -138,33 +142,88 @@ for i in range(n_test):
     test_error += torch.eq(torch.argmax(network.s[:,network.iy],dim=1),torch.argmax(y,dim=1)).sum()
 print(('\tUntrained error rate: %.06f'%(100*(1-(float(test_error)/n_test_ex))))+'%.')
 
+# Currently: testing performance with beta=1.015.
+
+# Next: sweep weight factor from 0 to 10
+
+##Changes made:
+   # Increased unclamped n_iter from 500 to 1000 and clamped n_iter from 8 to 100.
+     # Hypothesis: due to more neurons in network, the original number of iterations
+     #  was insufficient to produce a good approximation of the differential equation.
+     # Result: Appeared to stagnate after first epoch in same way that pre-change
+     #  networks stagnated after 5 epochs.
+     # Further trial: decreasing number of iterations from 500/8 to 100/8.
+   # Swept through various values of beta. Around 1.005 appears to work the best.
+     # Model is very sensitive to changes in beta; e.g., 1.0455 acheives error of
+     # 7.976% but 1.1566 has error of 35%.
+   # beta=1.015 appears to be a good choice.
+     # Weird phenomenon: graph of error rate vs. beta looks almost like upward-facing
+     # parabola, but error rate jumps up around where minimum would be. Likely result of
+     # effect where error reduces early on but jumps back up after 5 or so epochs.
+     # Note: this is a little bit higher than the beta corresponding to the lowest
+     # error rate. This is because for beta less than around 1.005, the error rate
+     # appeared to fluctuate widely, whereas above about 1.005 it appeared to increase
+     # in a smooth, exponential-like pattern. 1.015 seems therefore less-likely
+     # to stop training after some number of epochs.
+   # Verified that dataset is being properly reset after each epoch.
+   # Verified that persistant particles are being used correctly.
+     
+## Changes to try:
+   # Change training error rate calculation to match test error rate calculation,
+   #  as the differences between the two make it hard to tell if error rates are
+   #  reasonable.
+   # Compute clustering coefficient vs. number of added connections for a
+   #  Scellier-style network, as minimum value may not coincide with that of
+   #  network for linear dataset.
+   # Sweep learning rate around .1 to find the best one.
+   # Observe training magnitude to each layer to see if it makes sense.
+   # DONE: Make sure dataset is being fully reset after each epoch.
+   # DONE: Make sure persistant particles are being used correctly.
+   # Try changing beta and epsilon to see what effect it has.
+
 # to do: 24 networks, 50 epochs, around learning rate of .1: np.linspace(.01,.25,24)
-for lr in learning_rates:
+#for lr in learning_rates:
+for w in W_factor:
     t_lr = time.time()
-    print('Beginning testing with learning rate of %.04f.'%lr)
-    Error['learning rate'].append(lr)
+    print('Beginning testing with weight factor of %.04f.'%w)
+    Error['weight factor'].append(w)
     print('\tResetting network:')
     t_0 = time.time()
     network.initialize_state()
     network.initialize_biases()
     network.initialize_persistant_particles(n_particles=n_train_ex+n_test_ex)
     network.W = W_init.clone()
+    network.W *= w
     print('\t\tDone resetting network.')
     printTime(t_0, n_tabs=2)
     training_error, test_error = 0,0
     Error['training error'].append([])
     Error['test error'].append([])
+    layer_rates = []
     for epoch in range(1,num_epochs+1):
         print('\tEpoch %d:'%epoch)
-        t_0 = time.time()
-        training_error = 0
-        t_training_batch_sum = 0
         for i in range(n_train):
             t_batch = time.time()
             [x, y], index = dataset.get_training_batch()
-            training_error += network.train_batch(x, y, index, beta, [lr]*5)
+            network.train_batch(x, y, index, beta, [learning_rate]*5)
+            if i%(int(n_train/20)):
+                layer_rates.append(network.get_training_magnitudes())
+        # Test training error in the same way as test error
+        
+        training_error = 0
+        t_training_batch_sum = 0
+        #*** Testing training error in same manner as test error, to make the two
+        #    more comparable
+        for i in range(n_train):
+            t_batch = time.time()
+            [x,y], index = dataset.get_test_batch()
+            network.use_persistant_particle(index)
+            network.set_x_state(x)
+            network.evolve_to_equilibrium(y,0)
+            training_error += torch.eq(torch.argmax(network.s[:,network.iy],dim=1),torch.argmax(y,dim=1)).sum()
             t_training_batch_sum += time.time()-t_batch
         t_training_batch_sum /= n_train
+        
         test_error = 0
         t_testing_batch_sum = 0
         for i in range(n_test):
@@ -185,6 +244,7 @@ for lr in learning_rates:
               ('\n\t\tTest error: %.06f'%(100*(1-(float(test_error)/n_test_ex))))+'%.')
         Error['training error'][-1].append(1-(float(training_error)/n_train_ex))
         Error['test error'][-1].append(1-(float(test_error)/n_test_ex))
+    Error['layer rates'].append(layer_rates)
     print('Done training:')
     print(('\tFinal training error: %.06f'%(100*(1-(float(training_error)/n_train_ex))))+'%.')
     print(('\tFinal testing error: %.06f'%(100*(1-(float(test_error)/n_test_ex))))+'%.')
