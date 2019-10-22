@@ -81,7 +81,7 @@ n_iter = [500, 8]
   # Scellier test 1: [20,4]
   # Scellier test 2: [100,6]
   # Scellier test 3: [500,8]
-num_epochs = 50#10
+num_epochs = 200
  # number of times to train over full dataset
   # Scellier test 1: 25
   # Scellier test 2: 60
@@ -100,7 +100,7 @@ n_test_ex = 10000
   # 50k training examples and 10k testing examples in Scellier's code
 learning_rate = .1
 
-Error = {'weight factor': [],
+Error = {'beta': [],
          'training error': [],
          'test error': [],
          'layer rates': []}
@@ -183,17 +183,16 @@ print(('\tUntrained error rate: %.06f'%(100*(1-(float(test_error)/n_test_ex))))+
 
 # to do: 24 networks, 50 epochs, around learning rate of .1: np.linspace(.01,.25,24)
 #for lr in learning_rates:
-for w in W_factor:
+for b in betas:
     t_lr = time.time()
-    print('Beginning testing with weight factor of %.04f.'%w)
-    Error['weight factor'].append(w)
+    print('Beginning testing with beta of %.04f.'%b)
+    Error['beta'].append(b)
     print('\tResetting network:')
     t_0 = time.time()
     network.initialize_state()
     network.initialize_biases()
     network.initialize_persistant_particles(n_particles=n_train_ex+n_test_ex)
     network.W = W_init.clone()
-    network.W *= w
     print('\t\tDone resetting network.')
     printTime(t_0, n_tabs=2)
     training_error, test_error = 0,0
@@ -205,7 +204,7 @@ for w in W_factor:
         for i in range(n_train):
             t_batch = time.time()
             [x, y], index = dataset.get_training_batch()
-            network.train_batch(x, y, index, beta, [learning_rate]*5)
+            network.train_batch(x, y, index, b, [learning_rate]*5)
             if i%(int(n_train/20)):
                 layer_rates.append(network.get_training_magnitudes())
         # Test training error in the same way as test error
@@ -216,7 +215,7 @@ for w in W_factor:
         #    more comparable
         for i in range(n_train):
             t_batch = time.time()
-            [x,y], index = dataset.get_test_batch()
+            [x,y], index = dataset.get_training_batch()
             network.use_persistant_particle(index)
             network.set_x_state(x)
             network.evolve_to_equilibrium(y,0)
@@ -244,7 +243,7 @@ for w in W_factor:
               ('\n\t\tTest error: %.06f'%(100*(1-(float(test_error)/n_test_ex))))+'%.')
         Error['training error'][-1].append(1-(float(training_error)/n_train_ex))
         Error['test error'][-1].append(1-(float(test_error)/n_test_ex))
-    Error['layer rates'].append(layer_rates)
+    Error['layer rates'].append([float(l) for l in layer_rates])
     print('Done training:')
     print(('\tFinal training error: %.06f'%(100*(1-(float(training_error)/n_train_ex))))+'%.')
     print(('\tFinal testing error: %.06f'%(100*(1-(float(test_error)/n_test_ex))))+'%.')
