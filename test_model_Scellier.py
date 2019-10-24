@@ -143,9 +143,13 @@ for i in range(n_test):
     test_error += torch.eq(torch.argmax(network.s[:,network.iy],dim=1),torch.argmax(y,dim=1)).sum()
 print(('\tUntrained error rate: %.06f'%(100*(1-(float(test_error)/n_test_ex))))+'%.')
 
-# Currently: testing performance with beta=1.015.
+# Current: Testing new weighting scheme and sweeping intralayer connection magnitude.
 
-# Next: sweep weight factor from 0 to 10
+# Next: Gather data for this network under optimal conditions and save code to Github.
+# Test Scellier's 5-layer network with his parameters to contrast.
+# Run Scellier's 5-layer model without per-layer weights.
+# Run Scellier's 3-layer model without per-layer weights - hopefully worse than mine.
+# Focus on collecting linear data.
 
 ##Changes made:
    # Verified that network with beta=1.015 trains to similar extent to Scellier
@@ -204,6 +208,7 @@ for c_intra in c_intras:
     Error['test error'].append([])
     layer_rates = []
     for epoch in range(1,num_epochs+1):
+        t_0 = time.time()
         print('\tEpoch %d:'%epoch)
         for i in range(n_train):
             t_batch = time.time()
@@ -247,7 +252,7 @@ for c_intra in c_intras:
               ('\n\t\tTest error: %.06f'%(100*(1-(float(test_error)/n_test_ex))))+'%.')
         Error['training error'][-1].append(1-(float(training_error)/n_train_ex))
         Error['test error'][-1].append(1-(float(test_error)/n_test_ex))
-    Error['layer rates'].append([float(l) for l in layer_rates])
+    #Error['layer rates'].append([float(l) for l in layer_rates])
     print('Done training:')
     print(('\tFinal training error: %.06f'%(100*(1-(float(training_error)/n_train_ex))))+'%.')
     print(('\tFinal testing error: %.06f'%(100*(1-(float(test_error)/n_test_ex))))+'%.')

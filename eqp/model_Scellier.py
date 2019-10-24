@@ -85,8 +85,8 @@ class EQP_Network:
                 location_index = np.random.randint(len(self.potential_conn_indices))
                 W_mask[self.potential_conn_indices[location_index]] = 1
                 del self.potential_conn_indices[location_index]
-            #for i,j in zip(self.layer_indices[1:-2],self.layer_indices[2:-1]):
-            #    W_mask[i:j,i:j] = 1
+            for i,j in zip(self.layer_indices[1:-2],self.layer_indices[2:-1]):
+                W_mask[i:j,i:j] = 1
             for conn in interlayer_connections:
                 W_mask += conn  
             r"""
@@ -116,8 +116,8 @@ class EQP_Network:
                             size=W[i:,i:j].shape))
             W[i:j,i:j] = np.asarray(
                     self.rng.uniform(
-                            low=-c_intra/(j-i),
-                            high=c_intra/(j-i),
+                            low=-np.sqrt(c_intra/(j-i)),
+                            high=np.sqrt(c_intra/(j-i)),
                             size=W[i:j,i:j].shape))        
         
         W *= W_mask
