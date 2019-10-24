@@ -57,7 +57,7 @@ class EQP_Network:
     def set_persistant_particle(self, index, state):
         self.persistant_particles[index] = state[:,self.ihy].clone()
         
-    def initialize_weight_matrix(self, kind='Layered', symmetric=True, num_swconn=0):
+    def initialize_weight_matrix(self, kind='Layered', symmetric=True, num_swconn=0, c_intra=0):
         # initialize weight and mask to represent interlayer connection strengths
         self.num_swconn = num_swconn
         self.rng = np.random.RandomState(seed=self.seed)
@@ -88,36 +88,38 @@ class EQP_Network:
             for i,j in zip(self.layer_indices[1:-2],self.layer_indices[2:-1]):
                 W_mask[i:j,i:j] = 1
             for conn in interlayer_connections:
-                W_mask += conn        
+                W_mask += conn  
+            r"""
             if num_swconn!=0:
                 W += np.asarray(
                     self.rng.uniform(
                             low=-np.sqrt(3. / num_swconn),
                             high=np.sqrt(3. / num_swconn),
                             size=W.shape))
+            """
         # Glorot-Bengoi weight initialization, as in Scellier code
+        r"""
         for conn, n_in, n_out in zip(interlayer_connections, self.layer_sizes[:-1], self.layer_sizes[1:]):
             W[conn] = conn*np.asarray(
                     self.rng.uniform(
                             low=-np.sqrt(6. / (n_in+n_out)),
                             high=np.sqrt(6. / (n_in+n_out)),
                             size=W.shape))
-        # Test initialization based on Glorot-Bengio paper:
-        r"""
-        for i, n_in in zip(range(len(self.layer_sizes[:-1])), self.layer_sizes[:-1]):
-            for j, n_out in zip(range(1,1+len(self.layer_sizes[1:])), self.layer_sizes[1:]):
-                W[self.layer_indices[i]:self.layer_indices[i+1],self.layer_indices[j]:self.layer_indices[j+1]] = \
+        """
+        # New experimental weight initialization
+        for i, j, k in zip(self.layer_indices[0:-2],self.layer_indices[1:-1], self.layer_indices[2:]):
+            n_sw = np.count_nonzero(W_mask[j:,i:j])
+            W[i:,i:j] = np.asarray(
                     self.rng.uniform(
-<<<<<<< HEAD
+                            low=-np.sqrt(6. / ((j-i)+(k-j)+n_sw/(k-j))),
+                            high=np.sqrt(6. / ((j-i)+(k-j)+n_sw/(k-j))),
+                            size=W[i:,i:j].shape))
+            W[i:j,i:j] = np.asarray(
+                    self.rng.uniform(
                             low=-np.sqrt(c_intra/(j-i)),
                             high=np.sqrt(c_intra/(j-i)),
                             size=W[i:j,i:j].shape))        
         
-=======
-                            low=-np.sqrt(6. / (n_in+n_out)),
-                            high=np.sqrt(6. / (n_in+n_out)))
-        """
->>>>>>> parent of 9b3c385... Experimental weight initialization
         W *= W_mask
         if symmetric==True:
         # Make W and W_mask symmetrical with zeros on diagonal
