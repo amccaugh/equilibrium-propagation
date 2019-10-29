@@ -70,22 +70,18 @@ layer_sizes = [784, 500, 500, 500, 10]
 batch_size = 20
  # how many datapoints to consider during each step of gradient descent
   # 20 in all of Scellier's tests
-beta = 1
+beta = 1.015
  # clamping factor for weakly-clamped phase
    # 1.0 in all of Scellier's tests
 eps = .5
  # size of steps in differential equation
   # 0.5 in all of Scellier's tests
-n_iter = [1000,100]#[500, 8]
+n_iter = [500, 8]
  # number of timesteps in differential equation in free and weakly-clamped phases, respectively
   # Scellier test 1: [20,4]
   # Scellier test 2: [100,6]
   # Scellier test 3: [500,8]
-<<<<<<< HEAD
 num_epochs = 20
-=======
-num_epochs = 50
->>>>>>> parent of b44b9f6... Modified to sweep factor for weight matrix.
  # number of times to train over full dataset
   # Scellier test 1: 25
   # Scellier test 2: 60
@@ -102,14 +98,12 @@ n_train_ex = 50000
 n_test_ex = 10000
  # number of datapoints to consider
   # 50k training examples and 10k testing examples in Scellier's code
+learning_rate = .1
 
-<<<<<<< HEAD
 Error = {'c_intra': [],
-=======
-Error = {'learning rate': [],
->>>>>>> parent of b44b9f6... Modified to sweep factor for weight matrix.
          'training error': [],
-         'test error': []}
+         'test error': [],
+         'layer rates': []}
 
 torch.manual_seed(seed=seed)
 np.random.seed(seed=seed)
@@ -128,12 +122,9 @@ network.initialize_weight_matrix(kind='smallworld', symmetric=True, num_swconn=s
 W_init = network.W.clone()
  # store weight matrix since Numpy random functions take a long time to run
 learning_rates = np.linspace(.01,.26,15)
-<<<<<<< HEAD
 betas = [1.015]#np.linspace(.5,1.5,100)
 W_factor = np.linspace(0,10,100)
 c_intras = np.linspace(0,12,100)
-=======
->>>>>>> parent of b44b9f6... Modified to sweep factor for weight matrix.
  # rates for which to test network performance
 print('\tDone with initialization.')
 printTime(t_0, n_tabs=1, n_nl=1)
@@ -152,7 +143,6 @@ for i in range(n_test):
     test_error += torch.eq(torch.argmax(network.s[:,network.iy],dim=1),torch.argmax(y,dim=1)).sum()
 print(('\tUntrained error rate: %.06f'%(100*(1-(float(test_error)/n_test_ex))))+'%.')
 
-<<<<<<< HEAD
 # Current: Testing new weighting scheme and sweeping intralayer connection magnitude.
 
 # Next: Gather data for this network under optimal conditions and save code to Github.
@@ -205,14 +195,6 @@ for c_intra in c_intras:
     print('Beginning testing with beta of %.04f.'%c_intra)
     Error['c_intra'].append(c_intra)
     print('\tResetting network.')
-=======
-# to do: 24 networks, 50 epochs, around learning rate of .1: np.linspace(.01,.25,24)
-for lr in learning_rates:
-    t_lr = time.time()
-    print('Beginning testing with learning rate of %.04f.'%lr)
-    Error['learning rate'].append(lr)
-    print('\tResetting network:')
->>>>>>> parent of b44b9f6... Modified to sweep factor for weight matrix.
     t_0 = time.time()
     network.initialize_state()
     network.initialize_biases()
@@ -224,26 +206,32 @@ for lr in learning_rates:
     training_error, test_error = 0,0
     Error['training error'].append([])
     Error['test error'].append([])
+    layer_rates = []
     for epoch in range(1,num_epochs+1):
         t_0 = time.time()
         print('\tEpoch %d:'%epoch)
-        t_0 = time.time()
-        training_error = 0
-        t_training_batch_sum = 0
         for i in range(n_train):
             t_batch = time.time()
-<<<<<<< HEAD
+            [x, y], index = dataset.get_training_batch()
+            network.train_batch(x, y, index, beta, [learning_rate]*5)
+            if i%(int(n_train/20)):
+                layer_rates.append(network.get_training_magnitudes())
+        # Test training error in the same way as test error
+        
+        training_error = 0
+        t_training_batch_sum = 0
+        #*** Testing training error in same manner as test error, to make the two
+        #    more comparable
+        for i in range(n_train):
+            t_batch = time.time()
             [x,y], index = dataset.get_training_batch()
             network.use_persistant_particle(index)
             network.set_x_state(x)
             network.evolve_to_equilibrium(y,0)
             training_error += torch.eq(torch.argmax(network.s[:,network.iy],dim=1),torch.argmax(y,dim=1)).sum()
-=======
-            [x, y], index = dataset.get_training_batch()
-            training_error += network.train_batch(x, y, index, beta, [lr]*5)
->>>>>>> parent of b44b9f6... Modified to sweep factor for weight matrix.
             t_training_batch_sum += time.time()-t_batch
         t_training_batch_sum /= n_train
+        
         test_error = 0
         t_testing_batch_sum = 0
         for i in range(n_test):
@@ -264,10 +252,7 @@ for lr in learning_rates:
               ('\n\t\tTest error: %.06f'%(100*(1-(float(test_error)/n_test_ex))))+'%.')
         Error['training error'][-1].append(1-(float(training_error)/n_train_ex))
         Error['test error'][-1].append(1-(float(test_error)/n_test_ex))
-<<<<<<< HEAD
     #Error['layer rates'].append([float(l) for l in layer_rates])
-=======
->>>>>>> parent of b44b9f6... Modified to sweep factor for weight matrix.
     print('Done training:')
     print(('\tFinal training error: %.06f'%(100*(1-(float(training_error)/n_train_ex))))+'%.')
     print(('\tFinal testing error: %.06f'%(100*(1-(float(test_error)/n_test_ex))))+'%.')
