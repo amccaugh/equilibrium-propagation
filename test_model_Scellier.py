@@ -81,7 +81,11 @@ n_iter = [1000,100]#[500, 8]
   # Scellier test 1: [20,4]
   # Scellier test 2: [100,6]
   # Scellier test 3: [500,8]
+<<<<<<< HEAD
 num_epochs = 50
+=======
+num_epochs = 50#10
+>>>>>>> parent of 4cd8f2c... reached around Scellier performance
  # number of times to train over full dataset
   # Scellier test 1: 25
   # Scellier test 2: 60
@@ -99,7 +103,11 @@ n_test_ex = 10000
  # number of datapoints to consider
   # 50k training examples and 10k testing examples in Scellier's code
 
+<<<<<<< HEAD
 Error = {'learning rate': [],
+=======
+Error = {'weight factor': [],
+>>>>>>> parent of 4cd8f2c... reached around Scellier performance
          'training error': [],
          'test error': []}
 
@@ -139,16 +147,25 @@ for i in range(n_test):
 print(('\tUntrained error rate: %.06f'%(100*(1-(float(test_error)/n_test_ex))))+'%.')
 
 # to do: 24 networks, 50 epochs, around learning rate of .1: np.linspace(.01,.25,24)
+<<<<<<< HEAD
 for lr in learning_rates:
     t_lr = time.time()
     print('Beginning testing with learning rate of %.04f.'%lr)
     Error['learning rate'].append(lr)
+=======
+#for lr in learning_rates:
+for w in W_factor:
+    t_lr = time.time()
+    print('Beginning testing with weight factor of %.04f.'%w)
+    Error['weight factor'].append(w)
+>>>>>>> parent of 4cd8f2c... reached around Scellier performance
     print('\tResetting network:')
     t_0 = time.time()
     network.initialize_state()
     network.initialize_biases()
     network.initialize_persistant_particles(n_particles=n_train_ex+n_test_ex)
     network.W = W_init.clone()
+    network.W *= w
     print('\t\tDone resetting network.')
     printTime(t_0, n_tabs=2)
     training_error, test_error = 0,0
@@ -156,13 +173,32 @@ for lr in learning_rates:
     Error['test error'].append([])
     for epoch in range(1,num_epochs+1):
         print('\tEpoch %d:'%epoch)
+<<<<<<< HEAD
         t_0 = time.time()
+=======
+        for i in range(n_train):
+            t_batch = time.time()
+            [x, y], index = dataset.get_training_batch()
+            network.train_batch(x, y, index, beta, [learning_rate]*5)
+            if i%(int(n_train/20)):
+                layer_rates.append(network.get_training_magnitudes())
+        # Test training error in the same way as test error
+        
+>>>>>>> parent of 4cd8f2c... reached around Scellier performance
         training_error = 0
         t_training_batch_sum = 0
         for i in range(n_train):
             t_batch = time.time()
+<<<<<<< HEAD
             [x, y], index = dataset.get_training_batch()
             training_error += network.train_batch(x, y, index, beta, [lr]*5)
+=======
+            [x,y], index = dataset.get_test_batch()
+            network.use_persistant_particle(index)
+            network.set_x_state(x)
+            network.evolve_to_equilibrium(y,0)
+            training_error += torch.eq(torch.argmax(network.s[:,network.iy],dim=1),torch.argmax(y,dim=1)).sum()
+>>>>>>> parent of 4cd8f2c... reached around Scellier performance
             t_training_batch_sum += time.time()-t_batch
         t_training_batch_sum /= n_train
         test_error = 0
@@ -185,6 +221,10 @@ for lr in learning_rates:
               ('\n\t\tTest error: %.06f'%(100*(1-(float(test_error)/n_test_ex))))+'%.')
         Error['training error'][-1].append(1-(float(training_error)/n_train_ex))
         Error['test error'][-1].append(1-(float(test_error)/n_test_ex))
+<<<<<<< HEAD
+=======
+    Error['layer rates'].append(layer_rates)
+>>>>>>> parent of 4cd8f2c... reached around Scellier performance
     print('Done training:')
     print(('\tFinal training error: %.06f'%(100*(1-(float(training_error)/n_train_ex))))+'%.')
     print(('\tFinal testing error: %.06f'%(100*(1-(float(test_error)/n_test_ex))))+'%.')
